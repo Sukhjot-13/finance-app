@@ -1,28 +1,30 @@
-// FILE: src/lib/utils.js
-// Utility for combining Tailwind classes and formatting currency.
+// src/lib/utils.js
 
-import { clsx } from "clsx";
-import { twMerge } from "tailwind-merge";
-
-export function cn(...inputs) {
-  return twMerge(clsx(inputs));
-}
-
-export const formatCurrency = (amount) => {
-  if (typeof amount !== "number") {
-    amount = 0;
-  }
+export function formatCurrency(amount) {
   return new Intl.NumberFormat("en-US", {
     style: "currency",
-    currency: "USD",
+    currency: "USD", // Change to your desired currency
     minimumFractionDigits: 2,
   }).format(amount);
-};
+}
 
-export const formatDate = (dateString) => {
-  return new Date(dateString).toLocaleDateString("en-US", {
-    year: "numeric",
-    month: "long",
+export function formatDate(dateString) {
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
     day: "numeric",
-  });
-};
+    year: "numeric",
+  }).format(new Date(dateString));
+}
+
+// New helper function for setting the date input's value
+export function formatDateForInput(date) {
+  const d = new Date(date);
+  let month = "" + (d.getMonth() + 1);
+  let day = "" + d.getDate();
+  const year = d.getFullYear();
+
+  if (month.length < 2) month = "0" + month;
+  if (day.length < 2) day = "0" + day;
+
+  return [year, month, day].join("-");
+}
