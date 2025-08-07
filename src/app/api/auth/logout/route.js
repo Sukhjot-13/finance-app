@@ -2,18 +2,21 @@
 import { cookies } from "next/headers";
 import { sendSuccess, sendError, verifyToken } from "@/lib/server-utils";
 import User from "@/models/user.model";
-import { connectDB } from "@/lib/db";
+import dbConnect from "@/lib/mongodb";
 
 export async function POST(req) {
   const cookieStore = cookies();
   const refreshToken = cookieStore.get("refreshToken")?.value;
 
   try {
-    await connectDB();
-    
+    await dbConnect();
+
     if (refreshToken) {
       // Find the user and remove the specific refresh token
-      const decoded = verifyToken(refreshToken, process.env.REFRESH_TOKEN_SECRET);
+      const decoded = verifyToken(
+        refreshToken,
+        process.env.REFRESH_TOKEN_SECRET
+      );
       if (decoded && decoded.userId) {
         await User.updateOne(
           { _id: decoded.userId },

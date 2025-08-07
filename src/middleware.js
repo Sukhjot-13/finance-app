@@ -3,8 +3,13 @@ import { NextResponse } from "next/server";
 
 export async function middleware(request) {
   const { pathname } = request.nextUrl;
-  // Correctly access cookies from the request object in middleware
   const refreshToken = request.cookies.get("refreshToken")?.value;
+
+  // If the user is logged in (has a refresh token) and tries to
+  // access the login or welcome page, redirect them to the dashboard.
+  if (refreshToken && (pathname === "/login" || pathname === "/welcome")) {
+    return NextResponse.redirect(new URL("/dashboard", request.url));
+  }
 
   // Define public paths that don't require authentication
   const publicPaths = [
@@ -15,22 +20,15 @@ export async function middleware(request) {
     "/api/auth/refresh",
   ];
 
-  // Allow requests to public paths and API routes under /api/auth
-  if (publicPaths.some((path) => pathname.startsWith(path))) {
-    console.log("[MIDDLEWARE] Public path detected.");
-    return NextResponse.next();
-  }
-
-  // If there's no refresh token, redirect to login for protected routes
-  if (!refreshToken) {
+  // If the user is not logged in and is trying to access a protected route,
+  // redirect them to the login page.
+  if (!refreshToken && !publicPaths.some((path) => pathname.startsWith(path))) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     return NextResponse.redirect(url);
   }
 
-  // If the refresh token exists, let the request proceed.
-  // The actual access token validation/refresh will happen in the API routes
-  // or via the client-side api helper.
+  // Otherwise, allow the request to proceed.
   return NextResponse.next();
 }
 
