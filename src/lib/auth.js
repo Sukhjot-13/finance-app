@@ -1,50 +1,83 @@
-// FILE: src/lib/auth.js
-// ** THIS IS THE CORRECTED FILE **
-// Uses 'jose' library for all JWT operations to ensure Edge compatibility.
-
-import { SignJWT, jwtVerify } from "jose";
+// FILE: finance-app/src/lib/auth.js
+import jwt from "jsonwebtoken";
+import { nanoid } from "nanoid";
 import { cookies } from "next/headers";
+import { jwtVerify } from "jose";
 
-// The secret key must be converted to a Uint8Array for the 'jose' library.
-const secret = new TextEncoder().encode(process.env.JWT_SECRET);
+const ACCESS_TOKEN_SECRET = process.env.ACCESS_TOKEN_SECRET;
+const REFRESH_TOKEN_SECRET = process.env.REFRESH_TOKEN_SECRET;
 
-/**
- * Creates a JWT token.
- * @param {object} payload - The payload to include in the token.
- * @returns {Promise<string>} The generated JWT.
- */
-export async function createToken(payload) {
-  const token = await new SignJWT(payload)
-    .setProtectedHeader({ alg: "HS256" })
-    .setIssuedAt()
-    .setExpirationTime("30d")
-    .sign(secret);
-  return token;
+if (!ACCESS_TOKEN_SECRET || !REFRESH_TOKEN_SECRET) {
+  throw new Error("Missing JWT secret environment variables.");
 }
 
+const accessTokenSecret = new TextEncoder().encode(ACCESS_TOKEN_SECRET);
+
+export const generateAccessToken = (userId) => {
+  return jwt.sign({ userId }, ACCESS_TOKEN_SECRET, { expiresIn: "15m" });
+};
+
+export const generateRefreshToken = () => {
+  return jwt.sign({ jti: nanoid() }, REFRESH_TOKEN_SECRET, {
+    expiresIn: "30d",
+  });
+};
+
 /**
- * Verifies a JWT token.
- * @param {string} token - The JWT to verify.
- * @returns {Promise<object|null>} The decoded payload or null if verification fails.
+ * A lightweight verifier for the Edge runtime (Middleware).
+ * Renamed back to verifyAuth for consistency.
+ * It only checks the access token signature and does NOT touch the database.
  */
-export async function verifyToken(token) {
+export const verifyAuth = async () => {
+  const cookieStore = await cookies();
+  const token = cookieStore.get("accessToken")?.value;
+
+  if (!token) return { user: null };
+
   try {
-    const { payload } = await jwtVerify(token, secret);
-    return payload;
-  } catch (e) {
-    console.error("JWT Verification Error:", e.message);
-    return null;
+    const { payload } = await jwtVerify(token, accessTokenSecret);
+    return { user: { _id: payload.userId } };
+  } catch (err) {
+    return { user: null };
   }
-}
+};
 
 /**
- * Gets the current user session from the access token cookie.
- * @returns {Promise<object|null>} The session payload or null if not authenticated.
+ * A secure verifier for API Routes (Node.js runtime).
+ * It checks the access token AND verifies the refresh token exists in the database.
  */
-export async function getSession() {
-  const tokenCookie = cookies().get("accessToken");
-  if (!tokenCookie) {
-    return null;
+export const verifySession = async () => {
+  const User = (await import("@/models/user.model")).default;
+  const dbConnect = (await import("./mongodb")).default;
+
+  const cookieStore = await cookies();
+  const accessToken = cookieStore.get("accessToken")?.value;
+  const refreshToken = cookieStore.get("refreshToken")?.value;
+
+  if (!accessToken || !refreshToken) {
+    return { user: null, error: "Missing tokens" };
   }
-  return await verifyToken(tokenCookie.value);
-}
+
+  try {
+    const decoded = jwt.verify(accessToken, ACCESS_TOKEN_SECRET);
+    const userId = decoded.userId;
+
+    await dbConnect();
+
+    const userFromDb = await User.findOne({
+      _id: userId,
+      "refreshTokens.token": refreshToken,
+    });
+
+    if (!userFromDb) {
+      return {
+        user: null,
+        error: "Session invalid. Refresh token not found in DB.",
+      };
+    }
+
+    return { user: { _id: userId } };
+  } catch (error) {
+    return { user: null, error: error.message };
+  }
+};

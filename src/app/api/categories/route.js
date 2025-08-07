@@ -2,7 +2,7 @@
 import { NextResponse } from "next/server";
 import dbConnect from "@/lib/mongodb";
 import Category from "@/models/category.model";
-import { getSession } from "@/lib/auth";
+import { verifyAuth } from "@/lib/auth";
 
 const defaultExpenseCategories = [
   "Food",
@@ -25,14 +25,14 @@ const defaultIncomeCategories = [
 
 // GET all categories for the user (defaults + custom)
 export async function GET(request) {
-  const session = await getSession();
-  if (!session)
+  const { user } = await verifyAuth();
+  if (!user)
     return NextResponse.json({ message: "Not authenticated" }, { status: 401 });
 
   await dbConnect();
 
   try {
-    const userCategories = await Category.find({ userId: session.userId });
+    const userCategories = await Category.find({ userId: user._id });
     const expenseCategories = [
       ...new Set([
         ...defaultExpenseCategories,
@@ -59,8 +59,8 @@ export async function GET(request) {
 
 // POST a new custom category
 export async function POST(request) {
-  const session = await getSession();
-  if (!session)
+  const { user } = await verifyAuth();
+  if (!user)
     return NextResponse.json({ message: "Not authenticated" }, { status: 401 });
 
   await dbConnect();
@@ -74,7 +74,7 @@ export async function POST(request) {
   }
 
   try {
-    const newCategory = new Category({ name, type, userId: session.userId });
+    const newCategory = new Category({ name, type, userId: user._id });
     await newCategory.save();
     return NextResponse.json(newCategory, { status: 201 });
   } catch (error) {

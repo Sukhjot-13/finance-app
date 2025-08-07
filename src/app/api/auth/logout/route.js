@@ -1,33 +1,34 @@
 // src/app/api/auth/logout/route.js
-import { NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
+import { cookies } from "next/headers";
+import { sendSuccess, sendError, verifyToken } from "@/lib/server-utils";
+import User from "@/models/user.model";
+import { connectDB } from "@/lib/db";
 
-/**
- * Handles the POST request to log a user out.
- * It clears the accessToken cookie, effectively ending the user's session.
- * @param {Request} req - The incoming request object.
- * @returns {NextResponse} A response object.
- */
 export async function POST(req) {
+  const cookieStore = cookies();
+  const refreshToken = cookieStore.get("refreshToken")?.value;
+
   try {
-    // To log the user out, we overwrite the cookie with an expiration date in the past.
-    // This instructs the browser to delete it immediately.
-    cookies().set({
-      name: 'accessToken',
-      value: '',
-      httpOnly: true,
-      path: '/',
-      expires: new Date(0), // Set expiration to a past date
-    });
-
-    // Return a success message.
-    return NextResponse.json({ message: 'Logged out successfully' }, { status: 200 });
-
+    await connectDB();
+    
+    if (refreshToken) {
+      // Find the user and remove the specific refresh token
+      const decoded = verifyToken(refreshToken, process.env.REFRESH_TOKEN_SECRET);
+      if (decoded && decoded.userId) {
+        await User.updateOne(
+          { _id: decoded.userId },
+          { $pull: { refreshTokens: { token: refreshToken } } }
+        );
+      }
+    }
   } catch (error) {
-    // Log any unexpected errors that occur during the process.
-    console.error('Logout error:', error);
-
-    // Return a generic error response to the client.
-    return NextResponse.json({ error: 'Logout failed' }, { status: 500 });
+    // Even if there's an error, we should proceed to clear cookies
+    console.error("Logout error:", error.message);
+  } finally {
+    // Clear the cookies on the client side regardless
+    cookieStore.delete("accessToken");
+    cookieStore.delete("refreshToken");
   }
+
+  return sendSuccess({ message: "Logged out successfully" });
 }

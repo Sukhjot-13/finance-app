@@ -1,70 +1,82 @@
-// FILE: src/app/api/auth/otp/verify/route.js
-// Handles verifying the OTP and creating a session token.
-
-import dbConnect from "@/lib/mongodb";
+// src/app/api/auth/otp/verify/route.js
 import User from "@/models/user.model";
-import { createToken, setAuthCookies } from "@/lib/auth";
-import { NextResponse } from "next/server";
+import {
+  sendError,
+  sendSuccess,
+  generateAccessToken,
+  generateRefreshToken,
+} from "@/lib/server-utils";
+import bcrypt from "bcryptjs";
+import { cookies } from "next/headers";
+import dbConnect from "@/lib/mongodb";
 
-export async function POST(request) {
+export async function POST(req) {
   await dbConnect();
-  const { email, otp } = await request.json();
+  const { email, otp } = await req.json();
 
   if (!email || !otp) {
-    return NextResponse.json(
-      { message: "Email and OTP are required." },
-      { status: 400 }
-    );
+    return sendError("Email and OTP are required.", 400);
   }
 
   try {
     const user = await User.findOne({ email });
 
-    if (!user || !user.otp || user.otpExpires < new Date()) {
-      return NextResponse.json(
-        { message: "Invalid OTP or OTP has expired." },
-        { status: 400 }
-      );
+    if (!user || !user.otp || !user.otpExpires) {
+      return sendError("Invalid request. Please try again.", 400);
     }
 
-    const isMatch = await user.compareOTP(otp);
+    if (new Date() > user.otpExpires) {
+      return sendError("OTP has expired. Please request a new one.", 400);
+    }
+
+    const isMatch = await bcrypt.compare(otp, user.otp);
     if (!isMatch) {
-      return NextResponse.json({ message: "Invalid OTP." }, { status: 400 });
+      return sendError("Invalid OTP.", 400);
     }
 
-    // OTP is valid, clear it from DB
+    // OTP is valid, clear it from the database
     user.otp = undefined;
     user.otpExpires = undefined;
+
+    // Generate tokens
+    const accessToken = generateAccessToken(user._id);
+    const refreshToken = generateRefreshToken(user._id);
+
+    // Store the new refresh token in the database
+    user.refreshTokens.push({ token: refreshToken });
     await user.save();
 
-    // ** THE FIX IS HERE **
-    // Create JWT payload with a plain string for the user ID.
-    const tokenPayload = { userId: user._id.toString(), email: user.email };
-    const token = await createToken(tokenPayload);
-
-    // Set cookie in the response headers
-    const response = NextResponse.json(
-      {
-        message: "Login successful.",
-        isNewUser: !user.accountName,
-      },
-      { status: 200 }
-    );
-
-    response.cookies.set("accessToken", token, {
+    // Set cookies
+    const cookieStore = cookies();
+    cookieStore.set("accessToken", accessToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
-      sameSite: "strict",
+      maxAge: 15 * 60, // 15 minutes
       path: "/",
-      maxAge: 60 * 60 * 24 * 30, // 30 days
+      sameSite: "strict",
     });
 
-    return response;
+    cookieStore.set("refreshToken", refreshToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      maxAge: 30 * 24 * 60 * 60, // 30 days
+      path: "/",
+      sameSite: "strict",
+    });
+
+    const isNewUser = !user.accountName;
+
+    return sendSuccess({
+      message: "Login successful.",
+      isNewUser,
+      user: {
+        id: user._id,
+        email: user.email,
+        accountName: user.accountName,
+      },
+    });
   } catch (error) {
-    console.error("OTP Verify Error:", error);
-    return NextResponse.json(
-      { message: "An error occurred during verification." },
-      { status: 500 }
-    );
+    console.error(error);
+    return sendError("An internal server error occurred.", 500);
   }
 }

@@ -1,10 +1,10 @@
 // src/app/page.js
-import { getSession } from "@/lib/auth";
+import { verifyAuth } from "@/lib/auth"; // Import the actual function
 import { redirect } from "next/navigation";
 
 export default async function RootPage() {
-  const session = await getSession();
-  if (session) {
+  const session = await verifyAuth();
+  if (session.user) {
     redirect("/dashboard");
   } else {
     redirect("/login");

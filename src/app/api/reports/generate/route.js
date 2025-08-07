@@ -2,15 +2,14 @@
 import { NextResponse } from "next/server";
 import dbConnect from "@/lib/mongodb";
 import Transaction from "@/models/transaction.model";
-import { getSession } from "@/lib/auth";
+import { verifyAuth } from "@/lib/auth";
 
 export async function POST(request) {
-  const session = await getSession();
-  if (!session)
+  const { user } = await verifyAuth();
+  if (!user)
     return NextResponse.json({ message: "Not authenticated" }, { status: 401 });
 
   await dbConnect();
-  const { userId } = session;
   const { startDate, endDate } = await request.json();
 
   if (!startDate || !endDate) {
@@ -22,7 +21,7 @@ export async function POST(request) {
 
   try {
     const transactions = await Transaction.find({
-      userId,
+      userId: user._id,
       date: { $gte: new Date(startDate), $lte: new Date(endDate) },
     });
 

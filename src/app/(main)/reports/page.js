@@ -1,9 +1,7 @@
-// FILE: src/app/(main)/reports/page.js
-// Page for generating and viewing custom reports.
-
+// src/app/(main)/reports/page.js
 "use client";
 
-import { useState } from "react";
+import { useState, useContext } from "react"; // Import useContext
 import { Bar } from "react-chartjs-2";
 import {
   Chart as ChartJS,
@@ -15,6 +13,7 @@ import {
   Legend,
 } from "chart.js";
 import { formatCurrency } from "@/lib/utils";
+import { UserContext } from "@/app/(main)/layout"; // Import UserContext
 
 ChartJS.register(
   CategoryScale,
@@ -35,6 +34,7 @@ export default function ReportsPage() {
   const [report, setReport] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const user = useContext(UserContext); // Get user from context
 
   const generateReport = async () => {
     setLoading(true);
@@ -130,7 +130,7 @@ export default function ReportsPage() {
                 Total Income
               </h3>
               <p className="text-3xl font-bold text-green-600">
-                {formatCurrency(report.summary.totalIncome)}
+                {formatCurrency(report.summary.totalIncome, user?.currency)}
               </p>
             </div>
             <div className="bg-red-50 p-6 rounded-lg shadow-md">
@@ -138,7 +138,7 @@ export default function ReportsPage() {
                 Total Expenses
               </h3>
               <p className="text-3xl font-bold text-red-600">
-                {formatCurrency(report.summary.totalExpenses)}
+                {formatCurrency(report.summary.totalExpenses, user?.currency)}
               </p>
             </div>
             <div className="bg-blue-50 p-6 rounded-lg shadow-md">
@@ -152,7 +152,7 @@ export default function ReportsPage() {
                     : "text-red-600"
                 }`}
               >
-                {formatCurrency(report.summary.netSavings)}
+                {formatCurrency(report.summary.netSavings, user?.currency)}
               </p>
             </div>
           </div>
@@ -178,7 +178,7 @@ export default function ReportsPage() {
                     >
                       <span>{item.source}</span>
                       <span className="font-semibold">
-                        {formatCurrency(item.total)}
+                        {formatCurrency(item.total, user?.currency)}
                       </span>
                     </li>
                   ))

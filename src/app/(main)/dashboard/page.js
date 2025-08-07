@@ -1,16 +1,16 @@
 // src/app/(main)/dashboard/page.js
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useContext } from "react"; // Import useContext
 import { Pie } from "react-chartjs-2";
 import { Chart as ChartJS, ArcElement, Tooltip, Legend } from "chart.js";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { Plus, TrendingUp, TrendingDown, PiggyBank } from "lucide-react";
-import AddTransactionDrawer from "@/components/AddTransactionDrawer"; // The new drawer
+import AddTransactionDrawer from "@/components/AddTransactionDrawer";
+import { UserContext } from "@/app/(main)/layout"; // Import the UserContext
 
 ChartJS.register(ArcElement, Tooltip, Legend);
 
-// Redesigned StatCard with better aesthetics
 function StatCard({ title, value, icon: Icon, colorClass = "text-slate-800" }) {
   return (
     <div className="bg-white p-5 rounded-xl shadow-sm flex items-center space-x-4">
@@ -25,7 +25,6 @@ function StatCard({ title, value, icon: Icon, colorClass = "text-slate-800" }) {
   );
 }
 
-// A simple skeleton loader for a better loading experience
 function DashboardSkeleton() {
   return (
     <div className="animate-pulse">
@@ -46,6 +45,7 @@ export default function DashboardPage() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const user = useContext(UserContext); // Get user data from context
 
   const fetchData = async () => {
     setLoading(true);
@@ -56,7 +56,7 @@ export default function DashboardPage() {
       setData(result);
     } catch (error) {
       console.error(error);
-      setData(null); // Ensure data is null on error
+      setData(null);
     } finally {
       setLoading(false);
     }
@@ -84,13 +84,8 @@ export default function DashboardPage() {
       {
         data: data.expenseBreakdown.map((item) => item.total),
         backgroundColor: [
-          "#ef4444",
-          "#3b82f6",
-          "#f97316",
-          "#14b8a6",
-          "#8b5cf6",
-          "#eab308",
-          "#d946ef",
+          "#ef4444", "#3b82f6", "#f97316", "#14b8a6",
+          "#8b5cf6", "#eab308", "#d946ef",
         ],
         borderColor: "#ffffff",
         borderWidth: 2,
@@ -111,30 +106,27 @@ export default function DashboardPage() {
         onTransactionAdded={fetchData}
       />
       <div className="space-y-6 sm:space-y-8">
-        {/* Stat Cards */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <StatCard
             title="Current Balance"
-            value={formatCurrency(data.currentBalance)}
+            value={formatCurrency(data.currentBalance, user?.currency)}
             icon={PiggyBank}
           />
           <StatCard
             title="Income This Month"
-            value={formatCurrency(data.monthlyIncome)}
+            value={formatCurrency(data.monthlyIncome, user?.currency)}
             icon={TrendingUp}
             colorClass="text-green-600"
           />
           <StatCard
             title="Expenses This Month"
-            value={formatCurrency(data.monthlyExpenses)}
+            value={formatCurrency(data.monthlyExpenses, user?.currency)}
             icon={TrendingDown}
             colorClass="text-red-600"
           />
         </div>
 
-        {/* Main Content */}
         <div className="grid grid-cols-1 lg:grid-cols-5 gap-8">
-          {/* Recent Transactions */}
           <div className="lg:col-span-3 bg-white p-6 rounded-xl shadow-sm">
             <h2 className="text-lg font-semibold text-slate-800 mb-4">
               Recent Transactions
@@ -160,7 +152,7 @@ export default function DashboardPage() {
                       }`}
                     >
                       {t.type === "income" ? "+" : "-"}{" "}
-                      {formatCurrency(t.amount)}
+                      {formatCurrency(t.amount, user?.currency)}
                     </p>
                   </li>
                 ))
@@ -172,7 +164,6 @@ export default function DashboardPage() {
             </ul>
           </div>
 
-          {/* Expense Chart */}
           <div className="lg:col-span-2 bg-white p-6 rounded-xl shadow-sm flex flex-col">
             <h2 className="text-lg font-semibold text-slate-800 mb-4">
               Expense Breakdown
@@ -190,7 +181,6 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Floating Action Button */}
       <button
         onClick={() => setIsDrawerOpen(true)}
         className="fixed bottom-6 right-6 lg:bottom-8 lg:right-8 bg-indigo-600 text-white p-4 rounded-full shadow-lg hover:bg-indigo-700 transition-transform hover:scale-110 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 z-10"

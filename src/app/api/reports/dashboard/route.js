@@ -1,77 +1,95 @@
-// src/app/api/reports/dashboard/route.js
-import { NextResponse } from "next/server";
+// FILE: finance-app/src/app/api/reports/dashboard/route.js
 import dbConnect from "@/lib/mongodb";
 import Transaction from "@/models/transaction.model";
-import { getSession } from "@/lib/auth";
-import { startOfMonth, endOfMonth } from "date-fns";
+import { verifyAuth } from "@/lib/auth";
+import mongoose from "mongoose";
+import { NextResponse } from "next/server";
 
-export async function GET() {
-  const session = await getSession();
-  if (!session)
-    return NextResponse.json({ message: "Not authenticated" }, { status: 401 });
+export async function GET(req) {
+  // Use the correct verifyAuth function
+  const { user } = await verifyAuth();
+  if (!user) {
+    return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+  }
 
   await dbConnect();
-  const { userId } = session;
-  const now = new Date();
-  const monthStart = startOfMonth(now);
-  const monthEnd = endOfMonth(now);
 
   try {
-    const transactions = await Transaction.find({ userId });
-    const monthlyTransactions = transactions.filter((t) => {
-      const tDate = new Date(t.date);
-      return tDate >= monthStart && tDate <= monthEnd;
-    });
+    const userId = new mongoose.Types.ObjectId(user._id);
+    const today = new Date();
+    const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
 
-    const monthlyIncome = monthlyTransactions
-      .filter((t) => t.type === "income")
-      .reduce((sum, t) => sum + t.amount, 0);
+    // Aggregations
+    const balancePromise = Transaction.aggregate([
+      { $match: { userId } },
+      {
+        $group: {
+          _id: "$type",
+          total: { $sum: "$amount" },
+        },
+      },
+    ]);
 
-    const monthlyExpenses = monthlyTransactions
-      .filter((t) => t.type === "expense")
-      .reduce((sum, t) => sum + t.amount, 0);
+    const monthlyPromise = Transaction.aggregate([
+      { $match: { userId, date: { $gte: startOfMonth } } },
+      {
+        $group: {
+          _id: "$type",
+          total: { $sum: "$amount" },
+        },
+      },
+    ]);
 
-    const totalIncome = transactions
-      .filter((t) => t.type === "income")
-      .reduce((sum, t) => sum + t.amount, 0);
+    const expenseBreakdownPromise = Transaction.aggregate([
+      {
+        $match: {
+          userId,
+          type: "expense",
+          date: { $gte: startOfMonth },
+        },
+      },
+      {
+        $group: {
+          _id: "$category",
+          total: { $sum: "$amount" },
+        },
+      },
+      { $project: { category: "$_id", total: 1, _id: 0 } },
+    ]);
 
-    const totalExpenses = transactions
-      .filter((t) => t.type === "expense")
-      .reduce((sum, t) => sum + t.amount, 0);
+    const recentTransactionsPromise = Transaction.find({ userId })
+      .sort({ date: -1, createdAt: -1 })
+      .limit(5)
+      .lean();
 
-    const totalSavings = transactions
-      .filter((t) => t.type === "savings")
-      .reduce((sum, t) => sum + t.amount, 0);
+    const [balance, monthly, expenseBreakdown, recentTransactions] =
+      await Promise.all([
+        balancePromise,
+        monthlyPromise,
+        expenseBreakdownPromise,
+        recentTransactionsPromise,
+      ]);
 
-    const currentBalance = totalIncome - totalExpenses - totalSavings;
+    const income = balance.find((b) => b._id === "income")?.total || 0;
+    const expenses = balance.find((b) => b._id === "expense")?.total || 0;
+    const currentBalance = income - expenses;
 
-    const expenseBreakdown = monthlyTransactions
-      .filter((t) => t.type === "expense")
-      .reduce((acc, t) => {
-        acc[t.category] = (acc[t.category] || 0) + t.amount;
-        return acc;
-      }, {});
-
-    const expenseBreakdownArray = Object.entries(expenseBreakdown)
-      .map(([category, total]) => ({ category, total }))
-      .sort((a, b) => b.total - a.total);
-
-    const recentTransactions = await Transaction.find({ userId })
-      .sort({ date: -1 })
-      .limit(5);
+    const monthlyIncome = monthly.find((m) => m._id === "income")?.total || 0;
+    const monthlyExpenses =
+      monthly.find((m) => m._id === "expense")?.total || 0;
 
     return NextResponse.json(
       {
         currentBalance,
         monthlyIncome,
         monthlyExpenses,
-        expenseBreakdown: expenseBreakdownArray,
+        expenseBreakdown,
         recentTransactions,
       },
       { status: 200 }
     );
   } catch (error) {
-    console.error("Dashboard report error:", error);
+    console.error("Dashboard API Error:", error);
     return NextResponse.json({ message: "Server error" }, { status: 500 });
   }
 }

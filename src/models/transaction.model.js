@@ -1,4 +1,4 @@
-// models/transaction.model.js
+// FILE: finance-app/src/models/transaction.model.js
 import mongoose from "mongoose";
 
 const TransactionSchema = new mongoose.Schema(
@@ -10,7 +10,7 @@ const TransactionSchema = new mongoose.Schema(
     },
     type: {
       type: String,
-      enum: ["income", "expense", "savings"],
+      enum: ["income", "expense"],
       required: true,
     },
     amount: {
