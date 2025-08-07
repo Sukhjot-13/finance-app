@@ -74,6 +74,8 @@ To run this project, you will need to add the following environment variables to
 
 - `REFRESH_TOKEN_SECRET`: A long, random, and secret string used to sign refresh tokens. You can generate one using `openssl rand -base64 32`.
 
+- `JWT_SECRET`: A long, random, and secret string used to sign JWT tokens. You can generate one using `openssl rand -base64 32`.
+
 #### Example `.env.local` file:
 
 ```
@@ -82,6 +84,8 @@ BREVO_API_KEY=your_brevo_api_key
 EMAIL_FROM=your_sender_email@example.com
 ACCESS_TOKEN_SECRET=your_super_secret_access_token_string
 REFRESH_TOKEN_SECRET=your_super_secret_refresh_token_string
+JWT_SECRET="your_super_secret_JWT_token_string"
+
 ```
 
 ---
