@@ -5,7 +5,8 @@ import { useState, useEffect, useContext } from "react"; // Import useContext
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { Plus, TrendingUp, TrendingDown, PiggyBank } from "lucide-react";
 import AddTransactionDrawer from "@/components/AddTransactionDrawer";
-import ChartWrapper from "@/components/ChartWrapper";
+import SimpleChart from "@/components/SimpleChart";
+import ChartDebug from "@/components/ChartDebug";
 import { UserContext } from "@/app/(main)/layout"; // Import the UserContext
 
 function StatCard({ title, value, icon: Icon, colorClass = "text-slate-800" }) {
@@ -174,8 +175,12 @@ export default function DashboardPage() {
             <h2 className="text-lg font-semibold text-slate-800 mb-4">
               Expense Breakdown
             </h2>
+            
+            {/* Temporary debug component - remove after fixing */}
+            <ChartDebug data={pieData} options={pieOptions} />
+            
             {data.expenseBreakdown.length > 0 ? (
-              <ChartWrapper data={pieData} options={pieOptions} />
+              <SimpleChart data={pieData} options={pieOptions} />
             ) : (
               <div className="text-center text-slate-500 flex-1 flex items-center justify-center">
                 <p>No expenses recorded this month.</p>
