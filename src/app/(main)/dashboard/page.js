@@ -179,7 +179,16 @@ export default function DashboardPage() {
             {/* Temporary debug component - remove after fixing */}
             <ChartDebug data={pieData} options={pieOptions} />
             
-            {data.expenseBreakdown.length > 0 ? (
+            {/* Debug info */}
+            {process.env.NODE_ENV === "development" && (
+              <div className="mb-4 p-2 bg-blue-50 rounded text-xs">
+                <p>Monthly Expenses: {data.monthlyExpenses}</p>
+                <p>Expense Breakdown Count: {data.expenseBreakdown?.length || 0}</p>
+                <p>Expense Breakdown: {JSON.stringify(data.expenseBreakdown)}</p>
+              </div>
+            )}
+            
+            {data.expenseBreakdown && data.expenseBreakdown.length > 0 ? (
               <SimpleChart data={pieData} options={pieOptions} />
             ) : (
               <div className="text-center text-slate-500 flex-1 flex items-center justify-center">
