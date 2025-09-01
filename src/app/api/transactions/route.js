@@ -6,41 +6,94 @@ import { NextResponse } from "next/server";
 
 // GET all transactions for the user
 export async function GET(req) {
-  // Use the correct verifyAuth function
-  const { user } = await verifyAuth();
-  if (!user) {
-    return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
-  }
-
-  await dbConnect();
   try {
+    // Use the correct verifyAuth function
+    const { user } = await verifyAuth();
+    if (!user) {
+      return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+    }
+
+    await dbConnect();
+    
     const transactions = await Transaction.find({ userId: user._id }).sort({
       date: -1,
       createdAt: -1,
     });
     return NextResponse.json(transactions, { status: 200 });
   } catch (error) {
+    console.error("GET transactions error:", error);
     return NextResponse.json({ message: "Server error" }, { status: 500 });
   }
 }
 
 // POST a new transaction
 export async function POST(req) {
-  const { user } = await verifyAuth();
-  if (!user) {
-    return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
-  }
-
-  await dbConnect();
   try {
+    const { user } = await verifyAuth();
+    if (!user) {
+      return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+    }
+
+    await dbConnect();
     const body = await req.json();
-    const transaction = new Transaction({ ...body, userId: user._id });
+    
+    // Input validation
+    const { type, amount, category, date, description } = body;
+    
+    if (!type || !['income', 'expense'].includes(type)) {
+      return NextResponse.json(
+        { message: "Transaction type must be 'income' or 'expense'" },
+        { status: 400 }
+      );
+    }
+    
+    if (!amount || isNaN(amount) || amount <= 0) {
+      return NextResponse.json(
+        { message: "Amount must be a positive number" },
+        { status: 400 }
+      );
+    }
+    
+    if (!category || typeof category !== 'string' || category.trim().length === 0) {
+      return NextResponse.json(
+        { message: "Category is required" },
+        { status: 400 }
+      );
+    }
+    
+    if (!date || isNaN(Date.parse(date))) {
+      return NextResponse.json(
+        { message: "Valid date is required" },
+        { status: 400 }
+      );
+    }
+    
+    // Sanitize inputs
+    const sanitizedData = {
+      type,
+      amount: parseFloat(amount),
+      category: category.trim(),
+      date: new Date(date),
+      description: description ? description.trim() : '',
+      userId: user._id
+    };
+    
+    const transaction = new Transaction(sanitizedData);
     await transaction.save();
     return NextResponse.json(transaction, { status: 201 });
   } catch (error) {
+    console.error("POST transaction error:", error);
+    
+    if (error.name === 'ValidationError') {
+      return NextResponse.json(
+        { message: "Validation error", error: error.message },
+        { status: 400 }
+      );
+    }
+    
     return NextResponse.json(
-      { message: "Failed to create transaction", error: error.message },
-      { status: 400 }
+      { message: "Failed to create transaction" },
+      { status: 500 }
     );
   }
 }

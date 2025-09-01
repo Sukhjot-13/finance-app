@@ -17,8 +17,8 @@ export const generateAccessToken = (userId) => {
   return jwt.sign({ userId }, ACCESS_TOKEN_SECRET, { expiresIn: "15m" });
 };
 
-export const generateRefreshToken = () => {
-  return jwt.sign({ jti: nanoid() }, REFRESH_TOKEN_SECRET, {
+export const generateRefreshToken = (userId) => {
+  return jwt.sign({ userId, jti: nanoid() }, REFRESH_TOKEN_SECRET, {
     expiresIn: "30d",
   });
 };
