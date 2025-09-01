@@ -2,14 +2,11 @@
 "use client";
 
 import { useState, useEffect, useContext } from "react"; // Import useContext
-import { Pie } from "react-chartjs-2";
-import { Chart as ChartJS, ArcElement, Tooltip, Legend } from "chart.js";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { Plus, TrendingUp, TrendingDown, PiggyBank } from "lucide-react";
 import AddTransactionDrawer from "@/components/AddTransactionDrawer";
+import ChartWrapper from "@/components/ChartWrapper";
 import { UserContext } from "@/app/(main)/layout"; // Import the UserContext
-
-ChartJS.register(ArcElement, Tooltip, Legend);
 
 function StatCard({ title, value, icon: Icon, colorClass = "text-slate-800" }) {
   return (
@@ -95,7 +92,16 @@ export default function DashboardPage() {
 
   const pieOptions = {
     responsive: true,
-    plugins: { legend: { position: "bottom" } },
+    maintainAspectRatio: false,
+    plugins: { 
+      legend: { 
+        position: "bottom",
+        labels: {
+          usePointStyle: true,
+          padding: 20,
+        }
+      } 
+    },
   };
 
   return (
@@ -169,9 +175,7 @@ export default function DashboardPage() {
               Expense Breakdown
             </h2>
             {data.expenseBreakdown.length > 0 ? (
-              <div className="flex-1 flex items-center justify-center h-64 md:h-auto">
-                <Pie data={pieData} options={pieOptions} />
-              </div>
+              <ChartWrapper data={pieData} options={pieOptions} />
             ) : (
               <div className="text-center text-slate-500 flex-1 flex items-center justify-center">
                 <p>No expenses recorded this month.</p>
