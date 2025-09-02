@@ -3,25 +3,7 @@ import { NextResponse } from "next/server";
 import dbConnect from "@/lib/mongodb";
 import Category from "@/models/category.model";
 import { verifyAuth } from "@/lib/auth";
-
-const defaultExpenseCategories = [
-  "Food",
-  "Groceries",
-  "Transport",
-  "Bills",
-  "Housing",
-  "Entertainment",
-  "Health",
-  "Shopping",
-  "Other",
-];
-const defaultIncomeCategories = [
-  "Salary",
-  "Bonus",
-  "Freelance",
-  "Investment",
-  "Other",
-];
+import { defaultExpenseCategories, defaultIncomeCategories } from "@/lib/constants";
 
 // GET all categories for the user (defaults + custom)
 export async function GET(request) {

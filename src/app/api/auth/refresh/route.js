@@ -3,11 +3,8 @@ import { cookies } from "next/headers";
 import jwt from "jsonwebtoken";
 import dbConnect from "@/lib/mongodb";
 import User from "@/models/user.model";
-import {
-  generateAccessToken,
-  sendError,
-  sendSuccess,
-} from "@/lib/server-utils";
+import { sendError, sendSuccess } from "@/lib/server-utils";
+import { generateAccessToken } from "@/lib/auth";
 import mongoose from "mongoose";
 
 export async function POST() {

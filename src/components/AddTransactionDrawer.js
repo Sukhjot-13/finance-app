@@ -47,6 +47,8 @@ export default function AddTransactionDrawer({
   const [type, setType] = useState("expense");
   const [amount, setAmount] = useState("");
   const [category, setCategory] = useState("");
+  const [newCategory, setNewCategory] = useState("");
+  const [isAddingNewCategory, setIsAddingNewCategory] = useState(false);
   const [date, setDate] = useState(formatDateForInput(new Date()));
   const [description, setDescription] = useState("");
 
@@ -56,7 +58,7 @@ export default function AddTransactionDrawer({
 
   useEffect(() => {
     // Fetch categories when the drawer is opened for the first time
-    if (isOpen && categories.expense.length === 0) {
+    if (isOpen) {
       fetch("/api/categories")
         .then((res) => res.json())
         .then((data) => setCategories(data));
@@ -66,12 +68,46 @@ export default function AddTransactionDrawer({
   // Reset form when type changes
   useEffect(() => {
     setCategory("");
+    setIsAddingNewCategory(false);
   }, [type]);
+
+  const handleCategoryChange = (e) => {
+    const { value } = e.target;
+    if (value === "add_new") {
+      setIsAddingNewCategory(true);
+      setCategory("");
+    } else {
+      setIsAddingNewCategory(false);
+      setCategory(value);
+    }
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
     setError("");
+
+    let finalCategory = category;
+    if (isAddingNewCategory) {
+      if (!newCategory) {
+        setError("Please enter a name for the new category.");
+        setLoading(false);
+        return;
+      }
+      try {
+        const res = await fetch("/api/categories", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: newCategory, type }),
+        });
+        if (!res.ok) throw new Error("Failed to create category.");
+        finalCategory = newCategory;
+      } catch (err) {
+        setError(err.message);
+        setLoading(false);
+        return;
+      }
+    }
 
     try {
       const res = await fetch("/api/transactions", {
@@ -80,7 +116,7 @@ export default function AddTransactionDrawer({
         body: JSON.stringify({
           type,
           amount: parseFloat(amount),
-          category,
+          category: finalCategory,
           date,
           description,
         }),
@@ -105,6 +141,8 @@ export default function AddTransactionDrawer({
     setType("expense");
     setAmount("");
     setCategory("");
+    setNewCategory("");
+    setIsAddingNewCategory(false);
     setDate(formatDateForInput(new Date()));
     setDescription("");
     setError("");
@@ -200,8 +238,8 @@ export default function AddTransactionDrawer({
                 <select
                   id="category"
                   required
-                  value={category}
-                  onChange={(e) => setCategory(e.target.value)}
+                  value={isAddingNewCategory ? "add_new" : category}
+                  onChange={handleCategoryChange}
                   className="mt-1 w-full px-3 py-2 border border-slate-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
                 >
                   <option value="" disabled>
@@ -212,8 +250,27 @@ export default function AddTransactionDrawer({
                       {cat}
                     </option>
                   ))}
+                  <option value="add_new">-- Add New Category --</option>
                 </select>
               </div>
+
+              {isAddingNewCategory && (
+                <div>
+                  <label
+                    htmlFor="newCategory"
+                    className="block text-sm font-medium text-slate-700"
+                  >
+                    New Category Name
+                  </label>
+                  <input
+                    id="newCategory"
+                    type="text"
+                    value={newCategory}
+                    onChange={(e) => setNewCategory(e.target.value)}
+                    className="mt-1 w-full px-3 py-2 border border-slate-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                  />
+                </div>
+              )}
 
               <div>
                 <label

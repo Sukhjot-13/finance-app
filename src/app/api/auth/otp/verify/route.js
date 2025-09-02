@@ -1,11 +1,7 @@
 // src/app/api/auth/otp/verify/route.js
 import User from "@/models/user.model";
-import {
-  sendError,
-  sendSuccess,
-  generateAccessToken,
-  generateRefreshToken,
-} from "@/lib/server-utils";
+import { sendError, sendSuccess } from "@/lib/server-utils";
+import { generateAccessToken, generateRefreshToken } from "@/lib/auth";
 import bcrypt from "bcryptjs";
 import { cookies } from "next/headers";
 import dbConnect from "@/lib/mongodb";

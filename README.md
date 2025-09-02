@@ -8,8 +8,8 @@ FinTrack is a full-stack web application designed to help users manage their per
 
 - **Secure Authentication**: Passwordless, one-time password (OTP) login sent via email.
 - **Dashboard Overview**: At-a-glance view of current balance, monthly income, and monthly expenses.
-- **Transaction Management**: Easily add, view, edit, and delete income and expense transactions.
-- **Dynamic Categories**: Pre-defined categories for income/expenses with the ability to add custom ones.
+- **Transaction Management**: Easily add, view, edit, and delete income and expense transactions. Edit transactions with a full-featured modal, including the ability to change the description.
+- **Dynamic Categories**: Pre-defined categories for income/expenses with the ability to add custom ones on the fly from the transaction creation form.
 - **Financial Reports**: Generate and view detailed financial reports for custom date ranges.
 - **User Profile Management**: Users can update their account name and preferred currency.
 - **Responsive Design**: Fully responsive interface that works on desktops, tablets, and mobile devices.
@@ -163,9 +163,27 @@ finance-app/
 │   │   ├── layout.js        # Root layout
 │   │   └── page.js          # Root page
 │   ├── components/          # Reusable React components
-│   ├── lib/                 # Helper functions, API client, auth logic
+│   ├── lib/                 # Helper functions, API client, auth logic, constants
 │   └── models/              # Mongoose models for MongoDB
 ├── .env.local               # Environment variables (untracked)
 ├── next.config.js           # Next.js configuration
 └── tailwind.config.js       # Tailwind CSS configuration
+```
+
+---
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a pull request.
+
+### Development
+
+To get started with development, you'll need to have Node.js and MongoDB installed. Then, follow the installation instructions in the "Getting Started" section.
+
+### Linting
+
+This project uses ESLint for linting. To run the linter, use the following command:
+
+```bash
+npm run lint
 ```

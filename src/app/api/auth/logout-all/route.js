@@ -1,6 +1,7 @@
 // src/app/api/auth/logout-all/route.js
 import { cookies } from "next/headers";
-import { sendSuccess, sendError, verifyToken } from "@/lib/server-utils";
+import { sendSuccess, sendError } from "@/lib/server-utils";
+import { verifyToken } from "@/lib/auth";
 import User from "@/models/user.model";
 import dbConnect from "@/lib/mongodb";
 

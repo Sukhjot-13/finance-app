@@ -24,6 +24,21 @@ export const generateRefreshToken = (userId) => {
 };
 
 /**
+ * Verifies a JWT token.
+ * @param {string} token - The JWT token to verify.
+ * @param {string} secret - The secret key to use for verification.
+ * @returns {object | null} - The decoded payload or null if invalid.
+ */
+export function verifyToken(token, secret) {
+  try {
+    return jwt.verify(token, secret);
+  } catch (error) {
+    console.error("Token verification failed:", error.message);
+    return null;
+  }
+}
+
+/**
  * A lightweight verifier for the Edge runtime (Middleware).
  * Renamed back to verifyAuth for consistency.
  * It only checks the access token signature and does NOT touch the database.
