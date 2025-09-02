@@ -6,7 +6,7 @@ import { formatCurrency, formatDate } from "@/lib/utils";
 import { Plus, TrendingUp, TrendingDown, PiggyBank } from "lucide-react";
 import AddTransactionDrawer from "@/components/AddTransactionDrawer";
 import SimpleChart from "@/components/SimpleChart";
-import ChartDebug from "@/components/ChartDebug";
+
 import { UserContext } from "@/app/(main)/layout"; // Import the UserContext
 
 function StatCard({ title, value, icon: Icon, colorClass = "text-slate-800" }) {
@@ -176,17 +176,7 @@ export default function DashboardPage() {
               Expense Breakdown
             </h2>
             
-            {/* Temporary debug component - remove after fixing */}
-            <ChartDebug data={pieData} options={pieOptions} />
-            
-            {/* Debug info */}
-            {process.env.NODE_ENV === "development" && (
-              <div className="mb-4 p-2 bg-blue-50 rounded text-xs">
-                <p>Monthly Expenses: {data.monthlyExpenses}</p>
-                <p>Expense Breakdown Count: {data.expenseBreakdown?.length || 0}</p>
-                <p>Expense Breakdown: {JSON.stringify(data.expenseBreakdown)}</p>
-              </div>
-            )}
+
             
             {data.expenseBreakdown && data.expenseBreakdown.length > 0 ? (
               <SimpleChart data={pieData} options={pieOptions} />
