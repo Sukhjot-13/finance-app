@@ -11,19 +11,58 @@ import { UserContext } from "@/app/(main)/layout"; // Import the UserContext
 // Edit Transaction Modal Component
 function EditTransactionModal({ transaction, onClose, onSave }) {
   const [formData, setFormData] = useState({ ...transaction });
+  const [categories, setCategories] = useState({ expense: [], income: [] });
+  const [newCategory, setNewCategory] = useState("");
+  const [isAddingNewCategory, setIsAddingNewCategory] = useState(false);
 
   useEffect(() => {
     setFormData({ ...transaction });
+    // Fetch categories when the modal opens
+    const fetchCategories = async () => {
+      const res = await api("/api/categories");
+      const data = await res.json();
+      setCategories(data);
+    };
+    fetchCategories();
   }, [transaction]);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
-    setFormData((prev) => ({ ...prev, [name]: value }));
+    if (name === "category" && value === "add_new") {
+      setIsAddingNewCategory(true);
+      setFormData((prev) => ({ ...prev, category: "" }));
+    } else {
+      setIsAddingNewCategory(false);
+      setFormData((prev) => ({ ...prev, [name]: value }));
+    }
+  };
+
+  const handleNewCategoryChange = (e) => {
+    setNewCategory(e.target.value);
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    await onSave(formData);
+    let finalCategory = formData.category;
+    if (isAddingNewCategory) {
+      if (!newCategory) {
+        alert("Please enter a name for the new category.");
+        return;
+      }
+      try {
+        const res = await api("/api/categories", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: newCategory, type: formData.type }),
+        });
+        if (!res.ok) throw new Error("Failed to create category.");
+        finalCategory = newCategory;
+      } catch (err) {
+        alert(err.message);
+        return;
+      }
+    }
+    await onSave({ ...formData, category: finalCategory });
   };
 
   const getSafeDateValue = (dateString) => {
@@ -31,15 +70,17 @@ function EditTransactionModal({ transaction, onClose, onSave }) {
     try {
       const date = new Date(dateString);
       if (isNaN(date.getTime())) return "";
-      const year = date.getFullYear();
-      const month = (date.getMonth() + 1).toString().padStart(2, "0");
-      const day = date.getDate().toString().padStart(2, "0");
+      const year = date.getUTCFullYear();
+      const month = (date.getUTCMonth() + 1).toString().padStart(2, "0");
+      const day = date.getUTCDate().toString().padStart(2, "0");
       return `${year}-${month}-${day}`;
     } catch (error) {
       console.error("Could not parse date:", dateString);
       return "";
     }
   };
+
+  const currentCategories = formData.type === 'expense' ? categories.expense : categories.income;
 
   return (
     <motion.div
@@ -73,13 +114,32 @@ function EditTransactionModal({ transaction, onClose, onSave }) {
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700">Category</label>
-              <input
-                type="text" name="category" value={formData.category}
+              <select
+                name="category"
+                value={isAddingNewCategory ? "add_new" : formData.category}
                 onChange={handleChange}
                 className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2"
                 required
-              />
+              >
+                <option value="" disabled>Select a category</option>
+                {currentCategories.map((cat) => (
+                  <option key={cat} value={cat}>{cat}</option>
+                ))}
+                <option value="add_new">-- Add New Category --</option>
+              </select>
             </div>
+            {isAddingNewCategory && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700">New Category Name</label>
+                <input
+                  type="text"
+                  value={newCategory}
+                  onChange={handleNewCategoryChange}
+                  className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2"
+                  required
+                />
+              </div>
+            )}
             <div>
               <label className="block text-sm font-medium text-gray-700">Date</label>
               <input
@@ -87,6 +147,14 @@ function EditTransactionModal({ transaction, onClose, onSave }) {
                 onChange={handleChange}
                 className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2"
                 required
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700">Description</label>
+              <input
+                type="text" name="description" value={formData.description || ''}
+                onChange={handleChange}
+                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2"
               />
             </div>
           </div>
