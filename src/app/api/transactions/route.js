@@ -69,11 +69,19 @@ export async function POST(req) {
     }
     
     // Sanitize inputs
+    // FIX: The `new Date(date)` constructor treats the date string 'YYYY-MM-DD' as UTC.
+    // This causes a timezone issue where the date might be saved as the previous day.
+    // To fix this, we create a new Date object from the date string, which correctly
+    // interprets it in the server's local time zone, and then adjust for the timezone offset
+    // to ensure it reflects the user's local date.
+    const tempDate = new Date(date);
+    const userDate = new Date(tempDate.getTime() + tempDate.getTimezoneOffset() * 60000);
+
     const sanitizedData = {
       type,
       amount: parseFloat(amount),
       category: category.trim(),
-      date: new Date(date),
+      date: userDate,
       description: description ? description.trim() : '',
       userId: user._id
     };

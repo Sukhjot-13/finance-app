@@ -40,6 +40,12 @@ export async function PUT(request, { params }) {
     await dbConnect();
     const body = await request.json();
 
+    // FIX: Apply the same timezone correction for the date on update
+    if (body.date && typeof body.date === 'string') {
+      const tempDate = new Date(body.date);
+      body.date = new Date(tempDate.getTime() + tempDate.getTimezoneOffset() * 60000);
+    }
+
     // Ensure user can only update their own transaction
     const updatedTransaction = await Transaction.findOneAndUpdate(
       { _id: params.id, userId: user._id },
