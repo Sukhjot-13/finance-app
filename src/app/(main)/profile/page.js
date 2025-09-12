@@ -93,6 +93,22 @@ export default function ProfilePage() {
               className="mt-1 block w-full px-3 py-2 border border-slate-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
             />
           </div>
+
+          <div>
+            <label
+              htmlFor="email"
+              className="block text-sm font-medium text-slate-700"
+            >
+              Email Address
+            </label>
+            <input
+              id="email"
+              type="email"
+              value={user?.email || ""}
+              disabled
+              className="mt-1 block w-full px-3 py-2 border border-slate-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 bg-slate-50 text-slate-500"
+            />
+          </div>
           <div>
             <label
               htmlFor="currency"
