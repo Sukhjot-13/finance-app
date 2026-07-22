@@ -13,6 +13,8 @@ export async function PUT(request, { params }) {
 
   await dbConnect();
 
+  const { id } = await params;
+
   try {
     const { name } = await request.json();
 
@@ -24,7 +26,7 @@ export async function PUT(request, { params }) {
     }
 
     const category = await Category.findOneAndUpdate(
-      { _id: params.id, userId: user._id },
+      { _id: id, userId: user._id },
       { name: name.trim() },
       { new: true, runValidators: true }
     );
@@ -59,9 +61,11 @@ export async function DELETE(request, { params }) {
 
   await dbConnect();
 
+  const { id } = await params;
+
   try {
     const category = await Category.findOneAndDelete({
-      _id: params.id,
+      _id: id,
       userId: user._id,
     });
 

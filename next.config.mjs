@@ -1,6 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // Handle Chart.js SSR issues
+  // Keep using webpack for Chart.js SSR compatibility
+  turbopack: {},
   webpack: (config, { isServer }) => {
     if (!isServer) {
       config.resolve.fallback = {

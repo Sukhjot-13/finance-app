@@ -10,7 +10,7 @@ import mongoose from "mongoose";
 export async function POST() {
   console.log("\n--- Refresh Token Attempt ---");
   await dbConnect();
-  const cookieStore = cookies();
+  const cookieStore = await cookies();
   const token = await cookieStore.get("refreshToken")?.value;
 
   if (!token) {

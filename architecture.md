@@ -3,7 +3,7 @@
 ## Overview
 A Next.js 15 personal finance tracking application with OTP-based authentication, transaction management, reporting, and data visualization. Uses MongoDB with Mongoose for data persistence and Brevo (Sendinblue) for email-based OTP delivery.
 
-**Tech Stack:** Next.js 15, React 19, MongoDB/Mongoose, Tailwind CSS v4, Chart.js, Framer Motion, Lucide React, Brevo API, JWT (jsonwebtoken + jose)
+**Tech Stack:** Next.js 16, React 19, MongoDB/Mongoose, Tailwind CSS v4, Chart.js, Framer Motion, Lucide React, Brevo API, JWT (jsonwebtoken + jose)
 
 ---
 
@@ -36,7 +36,7 @@ A Next.js 15 personal finance tracking application with OTP-based authentication
 
 #### Middleware
 
-- **`src/middleware.js`** - Next.js Edge Middleware for route protection.
+- **`src/proxy.js`** - Next.js Edge Proxy (Middleware) for route protection. Next.js 16 uses the "proxy" convention for what was previously middleware.
   - `middleware()` - Checks for `refreshToken` cookie. If present and accessing `/login` or `/welcome`, redirects to `/dashboard`. Defines public paths (`/login`, `/welcome`, `/api/auth/otp/send`, `/api/auth/otp/verify`, `/api/auth/refresh`). If no `refreshToken` and accessing protected route, redirects to `/login`. Config: runs on all paths except `_next/static`, `_next/image`, and `favicon.ico`.
 
 ---

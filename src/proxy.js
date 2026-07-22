@@ -1,7 +1,7 @@
-// src/middleware.js
+// src/proxy.js
 import { NextResponse } from "next/server";
 
-export async function middleware(request) {
+export async function proxy(request) {
   const { pathname } = request.nextUrl;
   const refreshToken = request.cookies.get("refreshToken")?.value;
 

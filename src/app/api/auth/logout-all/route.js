@@ -6,7 +6,7 @@ import User from "@/models/user.model";
 import dbConnect from "@/lib/mongodb";
 
 export async function POST(req) {
-  const cookieStore = cookies();
+  const cookieStore = await cookies();
   const refreshToken = cookieStore.get("refreshToken")?.value;
 
   if (!refreshToken) {

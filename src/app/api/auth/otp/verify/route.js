@@ -43,7 +43,7 @@ export async function POST(req) {
     await user.save();
 
     // Set cookies
-    const cookieStore = cookies();
+    const cookieStore = await cookies();
     cookieStore.set("accessToken", accessToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",

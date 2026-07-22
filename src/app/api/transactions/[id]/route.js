@@ -11,10 +11,12 @@ export async function GET(request, { params }) {
   const { user, error } = await verifySession();
   if (error || !user) return sendError(error || "Unauthorized", 401);
 
+  const { id } = await params;
+
   try {
     await dbConnect();
     const transaction = await Transaction.findOne({
-      _id: params.id,
+      _id: id,
       userId: user._id, // Ensure user can only get their own transaction
     });
 
@@ -30,31 +32,41 @@ export async function GET(request, { params }) {
 }
 
 /**
- * UPDATE a transaction by its ID.
+ * PUT (update) a transaction by its ID.
  */
 export async function PUT(request, { params }) {
   const { user, error } = await verifySession();
   if (error || !user) return sendError(error || "Unauthorized", 401);
 
+  const { id } = await params;
+
   try {
     await dbConnect();
     const body = await request.json();
+    const { type, amount, category, date, description } = body;
 
-    // FIX: Apply the same timezone correction for the date on update
-    if (body.date && typeof body.date === 'string') {
-      const tempDate = new Date(body.date);
-      body.date = new Date(tempDate.getTime() + tempDate.getTimezoneOffset() * 60000);
+    // Apply timezone offset fix to preserve the user's local date
+    let parsedDate = date ? new Date(date) : undefined;
+    if (parsedDate && !isNaN(parsedDate.getTime())) {
+      parsedDate = new Date(
+        parsedDate.getTime() + parsedDate.getTimezoneOffset() * 60000
+      );
     }
 
-    // Ensure user can only update their own transaction
     const updatedTransaction = await Transaction.findOneAndUpdate(
-      { _id: params.id, userId: user._id },
-      body,
+      { _id: id, userId: user._id },
+      {
+        ...(type && { type }),
+        ...(amount && { amount: parseFloat(amount) }),
+        ...(category && { category: category.trim() }),
+        ...(parsedDate && { date: parsedDate }),
+        ...(description !== undefined && { description: description.trim() }),
+      },
       { new: true, runValidators: true }
     );
 
     if (!updatedTransaction) {
-      return sendError("Transaction not found or you do not have permission to edit it", 404);
+      return sendError("Transaction not found or unauthorized", 404);
     }
 
     return sendSuccess(updatedTransaction);
@@ -71,17 +83,18 @@ export async function DELETE(request, { params }) {
   const { user, error } = await verifySession();
   if (error || !user) return sendError(error || "Unauthorized", 401);
 
+  const { id } = await params;
+
   try {
     await dbConnect();
-    
     // Ensure user can only delete their own transaction
     const deletedTransaction = await Transaction.findOneAndDelete({
-      _id: params.id,
+      _id: id,
       userId: user._id,
     });
 
     if (!deletedTransaction) {
-      return sendError("Transaction not found or you do not have permission to delete it", 404);
+      return sendError("Transaction not found or unauthorized", 404);
     }
 
     return sendSuccess({ message: "Transaction deleted successfully" });
