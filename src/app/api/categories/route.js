@@ -31,7 +31,7 @@ export async function GET(request) {
     ];
 
     return NextResponse.json(
-      { expense: expenseCategories, income: incomeCategories },
+      { expense: expenseCategories, income: incomeCategories, allCustom: userCategories },
       { status: 200 }
     );
   } catch (error) {

@@ -52,16 +52,20 @@ export default function AddTransactionDrawer({
   const [date, setDate] = useState(formatDateForInput(new Date()));
   const [description, setDescription] = useState("");
 
-  const [categories, setCategories] = useState({ expense: [], income: [] });
+  const [categories, setCategories] = useState({ expense: [], income: [], allCustom: [] });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+
+  const fetchCategories = () => {
+    fetch("/api/categories")
+      .then((res) => res.json())
+      .then((data) => setCategories(data));
+  };
 
   useEffect(() => {
     // Fetch categories when the drawer is opened for the first time
     if (isOpen) {
-      fetch("/api/categories")
-        .then((res) => res.json())
-        .then((data) => setCategories(data));
+      fetchCategories();
     }
   }, [isOpen]);
 
@@ -102,6 +106,7 @@ export default function AddTransactionDrawer({
         });
         if (!res.ok) throw new Error("Failed to create category.");
         finalCategory = newCategory;
+        fetchCategories(); // Refresh the dropdown list
       } catch (err) {
         setError(err.message);
         setLoading(false);

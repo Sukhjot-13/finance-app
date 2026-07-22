@@ -162,7 +162,9 @@ export default function ReportsPage() {
             <div className="bg-white p-6 rounded-lg shadow-md">
               <h2 className="text-xl font-bold mb-4">Expense Breakdown</h2>
               {report.expenseDetails.length > 0 ? (
-                <Bar options={chartOptions} data={chartData} />
+                <div className="h-52 sm:h-64 lg:h-80">
+                  <Bar options={chartOptions} data={chartData} />
+                </div>
               ) : (
                 <p>No expenses in this period.</p>
               )}

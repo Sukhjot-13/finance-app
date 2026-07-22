@@ -8,6 +8,7 @@ import {
   Home,
   List,
   BarChart2,
+  Tags,
   LogOut,
   Menu,
   X,
@@ -27,6 +28,7 @@ function Sidebar({ isOpen, onClose }) {
     { href: "/dashboard", label: "Dashboard", icon: Home },
     { href: "/transactions", label: "Transactions", icon: List },
     { href: "/reports", label: "Reports", icon: BarChart2 },
+    { href: "/categories", label: "Categories", icon: Tags },
   ];
 
   const handleLinkClick = () => {
@@ -198,6 +200,7 @@ export default function MainLayout({ children }) {
     if (pathname.includes("/dashboard")) return "Dashboard";
     if (pathname.includes("/transactions")) return "Transactions";
     if (pathname.includes("/reports")) return "Reports";
+    if (pathname.includes("/categories")) return "Categories";
     if (pathname.includes("/profile")) return "Profile";
     return "FinTrack";
   };

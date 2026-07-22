@@ -37,7 +37,7 @@ export default function SimpleChart({ data, options }) {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
+      <div className="flex items-center justify-center h-52 sm:h-64">
         <div className="text-center text-slate-500">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600 mx-auto mb-2"></div>
           <p>Loading chart...</p>
@@ -48,7 +48,7 @@ export default function SimpleChart({ data, options }) {
 
   if (error) {
     return (
-      <div className="flex items-center justify-center h-64">
+      <div className="flex items-center justify-center h-52 sm:h-64">
         <div className="text-center text-red-500">
           <p>Chart failed to load</p>
           {process.env.NODE_ENV === "development" && (
@@ -61,7 +61,7 @@ export default function SimpleChart({ data, options }) {
 
   if (!ChartComponent) {
     return (
-      <div className="flex items-center justify-center h-64">
+      <div className="flex items-center justify-center h-52 sm:h-64">
         <div className="text-center text-slate-500">
           <p>Chart component not available</p>
         </div>
@@ -71,7 +71,7 @@ export default function SimpleChart({ data, options }) {
 
   if (!data || !data.labels || data.labels.length === 0) {
     return (
-      <div className="flex items-center justify-center h-64">
+      <div className="flex items-center justify-center h-52 sm:h-64">
         <div className="text-center text-slate-500">
           <p>No data available for chart</p>
         </div>
@@ -80,7 +80,7 @@ export default function SimpleChart({ data, options }) {
   }
 
   return (
-    <div className="flex-1 flex items-center justify-center" style={{ height: '300px', minHeight: '300px' }}>
+    <div className="flex-1 flex items-center justify-center w-full h-52 sm:h-64 lg:h-80">
       <ChartComponent data={data} options={options} />
     </div>
   );

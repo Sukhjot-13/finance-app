@@ -3,9 +3,11 @@
 
 import { useState, useEffect, useContext } from "react"; // Import useContext
 import { formatCurrency, formatDate } from "@/lib/utils";
-import { Plus, TrendingUp, TrendingDown, PiggyBank } from "lucide-react";
+import { Plus, TrendingUp, TrendingDown, PiggyBank, Wallet } from "lucide-react";
 import AddTransactionDrawer from "@/components/AddTransactionDrawer";
 import SimpleChart from "@/components/SimpleChart";
+import BudgetProgress from "@/components/BudgetProgress";
+import BudgetManager from "@/components/BudgetManager";
 
 import { UserContext } from "@/app/(main)/layout"; // Import the UserContext
 
@@ -43,6 +45,8 @@ export default function DashboardPage() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [isBudgetOpen, setIsBudgetOpen] = useState(false);
+  const [budgetVersion, setBudgetVersion] = useState(0);
   const user = useContext(UserContext); // Get user data from context
 
   const fetchData = async () => {
@@ -112,7 +116,7 @@ export default function DashboardPage() {
         onClose={() => setIsDrawerOpen(false)}
         onTransactionAdded={fetchData}
       />
-      <div className="space-y-6 sm:space-y-8">
+      <div className="space-y-6 sm:space-y-8 pb-20 sm:pb-8">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <StatCard
             title="Current Balance"
@@ -187,7 +191,32 @@ export default function DashboardPage() {
             )}
           </div>
         </div>
+
+        {/* Budget Progress Section */}
+        <div className="grid grid-cols-1 lg:grid-cols-5 gap-8">
+          <div className="lg:col-span-3 lg:col-start-2">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-lg font-semibold text-slate-800">
+                Budgets
+              </h2>
+              <button
+                onClick={() => setIsBudgetOpen(true)}
+                className="flex items-center gap-1 text-sm text-indigo-600 hover:text-indigo-800 font-medium"
+              >
+                <Wallet size={16} />
+                Set Budgets
+              </button>
+            </div>
+            <BudgetProgress key={budgetVersion} />
+          </div>
+        </div>
       </div>
+
+      <BudgetManager
+        isOpen={isBudgetOpen}
+        onClose={() => setIsBudgetOpen(false)}
+        onSaved={() => setBudgetVersion((v) => v + 1)}
+      />
 
       <button
         onClick={() => setIsDrawerOpen(true)}

@@ -22,7 +22,7 @@ export async function POST(request) {
   try {
     const transactions = await Transaction.find({
       userId: user._id,
-      date: { $gte: new Date(startDate), $lte: new Date(endDate) },
+      date: { $gte: new Date(startDate + "T00:00:00"), $lte: new Date(endDate + "T23:59:59.999") },
     });
 
     const totalIncome = transactions

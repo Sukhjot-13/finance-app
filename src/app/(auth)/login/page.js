@@ -1,7 +1,7 @@
 // app/(auth)/login/page.js
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { PiggyBank } from "lucide-react";
 
@@ -11,7 +11,33 @@ export default function LoginPage() {
   const [step, setStep] = useState(1); // 1 for email, 2 for OTP
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [checkingSession, setCheckingSession] = useState(true);
   const router = useRouter();
+
+  // Check if already logged in and redirect
+  useEffect(() => {
+    const checkSession = async () => {
+      try {
+        const res = await fetch("/api/user");
+        if (res.ok) {
+          router.replace("/dashboard");
+          return;
+        }
+      } catch {
+        // Not authenticated, stay on login
+      }
+      setCheckingSession(false);
+    };
+    checkSession();
+  }, [router]);
+
+  if (checkingSession) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-slate-50">
+        <PiggyBank className="w-12 h-12 text-indigo-600 animate-bounce" />
+      </div>
+    );
+  }
 
   const handleSendOtp = async (e) => {
     e.preventDefault();
@@ -106,7 +132,7 @@ export default function LoginPage() {
               </button>
             </form>
           ) : (
-            <form className="space-y-6" onSubmit={handleVerifyOtp}>
+            <form className="space-y-6" onSubmit={handleVerifyOtp} id="otp-form">
               <div>
                 <label htmlFor="otp" className="sr-only">
                   One-Time Password
@@ -118,7 +144,27 @@ export default function LoginPage() {
                   maxLength="6"
                   required
                   value={otp}
-                  onChange={(e) => setOtp(e.target.value)}
+                  onChange={(e) => {
+                    const val = e.target.value.replace(/\D/g, "").slice(0, 6);
+                    setOtp(val);
+                    if (val.length === 6) {
+                      setTimeout(() => {
+                        document.getElementById("otp-form")?.requestSubmit();
+                      }, 100);
+                    }
+                  }}
+                  onPaste={(e) => {
+                    e.preventDefault();
+                    const pasted = e.clipboardData.getData("text").replace(/\D/g, "").slice(0, 6);
+                    if (pasted) {
+                      setOtp(pasted);
+                      if (pasted.length === 6) {
+                        setTimeout(() => {
+                          document.getElementById("otp-form")?.requestSubmit();
+                        }, 100);
+                      }
+                    }
+                  }}
                   className="w-full text-center tracking-[0.5em] sm:tracking-[1em] px-3 py-2 border border-slate-300 rounded-md shadow-sm placeholder-slate-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
                   placeholder="______"
                 />
