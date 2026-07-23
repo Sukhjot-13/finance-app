@@ -12,12 +12,11 @@ export async function proxy(request) {
   }
 
   // Define public paths that don't require authentication
+  // All /api routes are excluded — they handle their own auth (return 401 when unauthenticated).
   const publicPaths = [
     "/login",
     "/welcome",
-    "/api/auth/otp/send",
-    "/api/auth/otp/verify",
-    "/api/auth/refresh",
+    "/api",
   ];
 
   // If the user is not logged in and is trying to access a protected route,

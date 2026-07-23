@@ -37,7 +37,7 @@ A Next.js 15 personal finance tracking application with OTP-based authentication
 #### Middleware
 
 - **`src/proxy.js`** - Next.js Edge Proxy (Middleware) for route protection. Next.js 16 uses the "proxy" convention for what was previously middleware.
-  - `middleware()` - Checks for `refreshToken` cookie. If present and accessing `/login` or `/welcome`, redirects to `/dashboard`. Defines public paths (`/login`, `/welcome`, `/api/auth/otp/send`, `/api/auth/otp/verify`, `/api/auth/refresh`). If no `refreshToken` and accessing protected route, redirects to `/login`. Config: runs on all paths except `_next/static`, `_next/image`, and `favicon.ico`.
+  - `middleware()` - Checks for `refreshToken` cookie. If present and accessing `/login` or `/welcome`, redirects to `/dashboard`. Defines public paths: `/login`, `/welcome`, and `/api` (all API routes excluded from middleware — they handle their own auth with proper 401 responses). If no `refreshToken` and accessing protected route, redirects to `/login`. Config: runs on all paths except `_next/static`, `_next/image`, and `favicon.ico`.
 
 ---
 
