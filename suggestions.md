@@ -41,3 +41,6 @@ Wrapping page-level components with React error boundaries so a crash doesn't wh
 
 ### Logout confirmation as a modal
 Profile dropdown logout fires immediately with no confirmation. A small "Are you sure?" dialog would prevent accidental logouts.
+
+### Migrate legacy transaction dates (stored at UTC midnight)
+Existing transactions created before the date fix were stored at `YYYY-MM-DDT00:00:00.000Z` (UTC midnight). They'll still render as the previous day for users west of UTC. A one-off migration script (`node -e` or a script run against MongoDB) that adds 12 hours to every transaction whose `getUTCHours() === 0 && getUTCMinutes() === 0` would normalize them to noon and fix their display date without changing any user's calendar date. (2026-08-04)

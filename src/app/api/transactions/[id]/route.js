@@ -45,13 +45,10 @@ export async function PUT(request, { params }) {
     const body = await request.json();
     const { type, amount, category, date, description } = body;
 
-    // Apply timezone offset fix to preserve the user's local date
+    // Store the date exactly as the client sent it (see POST /api/transactions
+    // for why no timezone-offset adjustment belongs on the server).
     let parsedDate = date ? new Date(date) : undefined;
-    if (parsedDate && !isNaN(parsedDate.getTime())) {
-      parsedDate = new Date(
-        parsedDate.getTime() + parsedDate.getTimezoneOffset() * 60000
-      );
-    }
+    if (parsedDate && isNaN(parsedDate.getTime())) parsedDate = undefined;
 
     const updatedTransaction = await Transaction.findOneAndUpdate(
       { _id: id, userId: user._id },

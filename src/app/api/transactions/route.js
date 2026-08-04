@@ -69,13 +69,15 @@ export async function POST(req) {
     }
     
     // Sanitize inputs
-    // FIX: The `new Date(date)` constructor treats the date string 'YYYY-MM-DD' as UTC.
-    // This causes a timezone issue where the date might be saved as the previous day.
-    // To fix this, we create a new Date object from the date string, which correctly
-    // interprets it in the server's local time zone, and then adjust for the timezone offset
-    // to ensure it reflects the user's local date.
-    const tempDate = new Date(date);
-    const userDate = new Date(tempDate.getTime() + tempDate.getTimezoneOffset() * 60000);
+    // Store the date exactly as the client sent it. The client sends an ISO
+    // instant for 12:00 noon in the USER's local timezone (e.g. for a UTC-5
+    // user picking Aug 4, the client sends "2026-08-04T17:00:00.000Z").
+    // Storing that instant as-is means it renders back as the same calendar
+    // date for the user in any timezone.
+    // IMPORTANT: never adjust by the server's own timezone offset here — the
+    // server's timezone is irrelevant to the user (and is UTC in production,
+    // which is what made dates shift to the previous day).
+    const userDate = new Date(date);
 
     const sanitizedData = {
       type,

@@ -65,7 +65,7 @@ A Next.js 15 personal finance tracking application with OTP-based authentication
   - `DashboardPage()` - Main dashboard. Fetches data from `GET /api/reports/dashboard`. Displays 3 stat cards (Current Balance, Income This Month, Expenses This Month) using `UserContext` currency. Shows recent transactions (up to 5) and expense breakdown pie chart (via `SimpleChart`). Includes budget progress section and "Set Budgets" button. Bottom padding (`pb-20` mobile) prevents FAB overlap. Includes FAB button to open `AddTransactionDrawer`. State: `data`, `loading`. Handles empty data/error states gracefully.
 
 - **`src/app/(main)/transactions/page.js`** - Transactions page ("use client").
-  - `EditTransactionModal()` - Modal for editing a transaction. Fetches categories from `GET /api/categories`. Supports selecting existing categories or creating new ones via `POST /api/categories`. Saves via `PUT /api/transactions/[id]`. State: `formData`, `categories`, `newCategory`, `isAddingNewCategory`. Animated with Framer Motion.
+  - `EditTransactionModal()` - Modal for editing a transaction. Fetches categories from `GET /api/categories`. Supports selecting existing categories or creating new ones via `POST /api/categories`. Saves via `PUT /api/transactions/[id]`. Normalizes the stored date to `YYYY-MM-DD` via `formatDateForInput` (local-timezone getters) so the date input shows the same date as the list, and sends the date back as `new Date(date + "T12:00:00")` (noon in user's local time) on save. State: `formData`, `categories`, `newCategory`, `isAddingNewCategory`. Animated with Framer Motion.
   - `TransactionCard()` - Mobile card component for a single transaction. Shows type badge, category, date, amount, description, and inline confirm-once delete (no browser dialog). Used on screens < 640px.
   - `TransactionsPage()` - Main transactions page. **Responsive layout**: table view on desktop (≥640px), card list on mobile (<640px). Fetches from `GET /api/transactions`. Filters by search, type, category, date range. Delete uses **inline confirm** (no `window.confirm`/`alert()`). Errors shown as **inline dismissible banner**. Uses `UserContext` for currency formatting. Loading state uses animated skeleton cards.
 
@@ -109,11 +109,11 @@ A Next.js 15 personal finance tracking application with OTP-based authentication
 
 - **`src/app/api/transactions/route.js`** - Transaction list and creation.
   - `GET` - Returns all transactions for authenticated user, sorted by `date` desc, `createdAt` desc.
-  - `POST` - Creates new transaction. Validates: type (income/expense), amount (positive number), category (non-empty string), date (valid parseable). Applies timezone offset fix: creates Date from string then adjusts for timezone offset to preserve user's local date. Sanitizes inputs (trim, parseFloat).
+  - `POST` - Creates new transaction. Validates: type (income/expense), amount (positive number), category (non-empty string), date (valid parseable). Stores the date exactly as the client sent it (client sends an ISO instant at 12:00 noon in the user's local timezone — the server never adjusts by its own offset, since the server timezone is irrelevant to the user and is UTC in production). Sanitizes inputs (trim, parseFloat).
 
 - **`src/app/api/transactions/[id]/route.js`** - Single transaction CRUD.
   - `GET` - Gets transaction by ID. Uses `verifySession()` (secure verifier with DB check). Ensures user owns the transaction.
-  - `PUT` - Updates transaction by ID. Applies same timezone offset fix for date. Uses `findOneAndUpdate` with ownership check and `runValidators`.
+  - `PUT` - Updates transaction by ID. Stores date exactly as the client sent it (no timezone offset adjustment on the server — same rule as POST). Uses `findOneAndUpdate` with ownership check and `runValidators`.
   - `DELETE` - Deletes transaction by ID. Uses `findOneAndDelete` with ownership check.
 
 #### Categories API
@@ -205,7 +205,7 @@ A Next.js 15 personal finance tracking application with OTP-based authentication
 
 - **`src/components/AddTransactionDrawer.js`** - Slide-in drawer for adding transactions ("use client").
   - `SegmentedControl()` - Custom toggle between Expense/Income with animated active pill using Framer Motion `layoutId`.
-  - `AddTransactionDrawer({ isOpen, onClose, onTransactionAdded })` - Form with type toggle, amount input, category select (with "Add New" option), date picker, description field, and payment method selector (Cash/Card). Fetches categories on open — shows merged list of built-in defaults + custom categories in the dropdown. "Add New" option creates a new custom category via `POST /api/categories` and refreshes the list. Submits transaction via `POST /api/transactions`. Resets form state on close. Animated slide-in from right with backdrop overlay.
+  - `AddTransactionDrawer({ isOpen, onClose, onTransactionAdded })` - Form with type toggle, amount input, category select (with "Add New" option), date picker, description field, and payment method selector (Cash/Card). Fetches categories on open — shows merged list of built-in defaults + custom categories in the dropdown. "Add New" option creates a new custom category via `POST /api/categories` and refreshes the list. Submits transaction via `POST /api/transactions`, sending the date as `new Date(date + "T12:00:00")` — an ISO instant at 12:00 noon in the user's local timezone (noon avoids DST edge cases), so the server stores an exact instant and the transaction always renders on the calendar date the user picked. Default date is `formatDateForInput(new Date())` (user's local date). Resets form state on close. Animated slide-in from right with backdrop overlay.
 
 - **`src/components/SimpleChart.js`** - Lazy-loaded pie chart component ("use client").
   - `SimpleChart({ data, options })` - Dynamically imports Chart.js and react-chartjs-2. Registers `ArcElement`, `Tooltip`, `Legend`. Renders `<Pie>` component. States: loading (spinner), error (red message with dev-only details), no data, component not available, and chart rendering. Height: 300px, min-height: 300px.
@@ -249,7 +249,7 @@ A Next.js 15 personal finance tracking application with OTP-based authentication
 - **Database-Backed Sessions**: Refresh tokens stored in user document for server-side revocation
 - **Rate Limiting**: In-memory OTP rate limiting (5/hour per email) - should use Redis in production
 - **Edge Compatible Auth**: Separate lightweight (`verifyAuth` using jose) and secure (`verifySession` using jsonwebtoken + DB) verifiers
-- **Timezone Handling**: Date inputs use timezone offset adjustment to preserve user's local date
+- **Timezone Handling**: The client sends transaction dates as an ISO instant at 12:00 noon in the user's local timezone (`new Date(date + "T12:00:00")`); the server stores that instant as-is and never adjusts by its own offset. This preserves the user's selected calendar date across all timezones (the old server-side `getTimezoneOffset()` adjustment only worked in dev where server and user shared a timezone — in production the server is UTC so it was a no-op, shifting dates a day back for users west of UTC)
 - **Lazy-Loaded Charts**: Chart.js dynamically imported to avoid SSR issues
 
 ---

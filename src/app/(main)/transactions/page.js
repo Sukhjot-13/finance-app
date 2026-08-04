@@ -2,7 +2,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useContext } from "react";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { formatCurrency, formatDate, formatDateForInput } from "@/lib/utils";
 import api from "@/lib/api";
 import { Trash2, Edit, X, ChevronDown } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
@@ -10,13 +10,22 @@ import { UserContext } from "@/app/(main)/layout";
 
 // Edit Transaction Modal Component
 function EditTransactionModal({ transaction, onClose, onSave }) {
-  const [formData, setFormData] = useState({ ...transaction });
+  // Normalize the stored date to "YYYY-MM-DD" (local timezone) so the date
+  // input shows exactly the date the user sees in the list. Dates are stored
+  // as instants, so they must be converted with the viewer's local getters.
+  const [formData, setFormData] = useState({
+    ...transaction,
+    date: formatDateForInput(new Date(transaction.date)),
+  });
   const [categories, setCategories] = useState({ expense: [], income: [] });
   const [newCategory, setNewCategory] = useState("");
   const [isAddingNewCategory, setIsAddingNewCategory] = useState(false);
 
   useEffect(() => {
-    setFormData({ ...transaction });
+    setFormData({
+      ...transaction,
+      date: formatDateForInput(new Date(transaction.date)),
+    });
     const fetchCategories = async () => {
       const res = await api("/api/categories");
       const data = await res.json();
@@ -57,21 +66,13 @@ function EditTransactionModal({ transaction, onClose, onSave }) {
         return;
       }
     }
-    await onSave({ ...formData, category: finalCategory });
-  };
-
-  const getSafeDateValue = (dateString) => {
-    if (!dateString) return "";
-    try {
-      const date = new Date(dateString);
-      if (isNaN(date.getTime())) return "";
-      const year = date.getUTCFullYear();
-      const month = (date.getUTCMonth() + 1).toString().padStart(2, "0");
-      const day = date.getUTCDate().toString().padStart(2, "0");
-      return `${year}-${month}-${day}`;
-    } catch (error) {
-      return "";
-    }
+    // Send the date as an instant at 12:00 noon in the user's local timezone,
+    // matching AddTransactionDrawer (see the comment there).
+    await onSave({
+      ...formData,
+      category: finalCategory,
+      date: new Date(formData.date + "T12:00:00"),
+    });
   };
 
   const currentCategories = formData.type === 'expense' ? categories.expense : categories.income;
@@ -137,7 +138,7 @@ function EditTransactionModal({ transaction, onClose, onSave }) {
             <div>
               <label className="block text-sm font-medium text-gray-700">Date</label>
               <input
-                type="date" name="date" value={getSafeDateValue(formData.date)}
+                type="date" name="date" value={formData.date}
                 onChange={handleChange}
                 className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2"
                 required

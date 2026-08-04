@@ -122,7 +122,12 @@ export default function AddTransactionDrawer({
           type,
           amount: parseFloat(amount),
           category: finalCategory,
-          date,
+          // Send the date as an instant at 12:00 noon in the user's local
+          // timezone (JSON.stringify converts it to a full UTC ISO string).
+          // The server stores it as-is; this guarantees the transaction is
+          // rendered on the same calendar date the user picked, regardless of
+          // where the server runs. Noon (not midnight) avoids DST edge cases.
+          date: new Date(date + "T12:00:00"),
           description,
         }),
       });
