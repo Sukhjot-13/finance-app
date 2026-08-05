@@ -43,7 +43,7 @@ export async function PUT(request, { params }) {
   try {
     await dbConnect();
     const body = await request.json();
-    const { type, amount, category, date, description } = body;
+    const { type, amount, category, date, description, excludeFromBudget } = body;
 
     // Store the date exactly as the client sent it (see POST /api/transactions
     // for why no timezone-offset adjustment belongs on the server).
@@ -58,6 +58,9 @@ export async function PUT(request, { params }) {
         ...(category && { category: category.trim() }),
         ...(parsedDate && { date: parsedDate }),
         ...(description !== undefined && { description: description.trim() }),
+        // Check against undefined (not truthiness) so `false` persists —
+        // `...(excludeFromBudget && {...})` would silently drop a cleared flag.
+        ...(excludeFromBudget !== undefined && { excludeFromBudget: Boolean(excludeFromBudget) }),
       },
       { new: true, runValidators: true }
     );

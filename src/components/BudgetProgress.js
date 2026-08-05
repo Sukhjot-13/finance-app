@@ -70,6 +70,12 @@ export default function BudgetProgress() {
           {data.totalSpent > 0 && (
             <p className="text-xs text-slate-400 mt-1">
               Total spent this month: {fmt(data.totalSpent)}
+              {data.excludedSpent > 0 && (
+                <span className="text-amber-600">
+                  {" "}
+                  (excl. {fmt(data.excludedSpent)} in one-time expenses)
+                </span>
+              )}
             </p>
           )}
         </div>

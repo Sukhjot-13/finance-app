@@ -41,7 +41,10 @@ function EditTransactionModal({ transaction, onClose, onSave }) {
       setFormData((prev) => ({ ...prev, category: "" }));
     } else {
       setIsAddingNewCategory(false);
-      setFormData((prev) => ({ ...prev, [name]: value }));
+      // Checkboxes expose their checked state via `checked`, not `value`
+      // (value is the string "on"/"").
+      const nextValue = e.target.type === "checkbox" ? e.target.checked : value;
+      setFormData((prev) => ({ ...prev, [name]: nextValue }));
     }
   };
 
@@ -152,6 +155,25 @@ function EditTransactionModal({ transaction, onClose, onSave }) {
                 className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2"
               />
             </div>
+            {formData.type === "expense" && (
+              <label className="flex items-start gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  name="excludeFromBudget"
+                  checked={!!formData.excludeFromBudget}
+                  onChange={handleChange}
+                  className="mt-0.5 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                />
+                <span>
+                  <span className="block text-sm font-medium text-gray-700">
+                    One-time expense
+                  </span>
+                  <span className="block text-xs text-gray-500">
+                    Don't count this in my monthly budget
+                  </span>
+                </span>
+              </label>
+            )}
           </div>
           <div className="mt-6 flex justify-end gap-3">
             <button type="button" onClick={onClose} className="px-4 py-2 text-sm rounded-md text-slate-600 hover:bg-slate-100">
@@ -188,6 +210,11 @@ function TransactionCard({ transaction, userCurrency, onEdit, onDelete }) {
             <span className="text-sm font-medium text-slate-700 truncate">
               {transaction.category}
             </span>
+            {transaction.excludeFromBudget && (
+              <span className="shrink-0 text-xs text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
+                One-time
+              </span>
+            )}
           </div>
           <p className="text-xs text-slate-400 mt-1">{formatDate(transaction.date)}</p>
         </div>
@@ -474,7 +501,14 @@ export default function TransactionsPage() {
                       {t.type}
                     </span>
                   </td>
-                  <td className="p-3 text-sm">{t.category}</td>
+                  <td className="p-3 text-sm">
+                    {t.category}
+                    {t.excludeFromBudget && (
+                      <span className="ml-2 text-xs text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
+                        One-time
+                      </span>
+                    )}
+                  </td>
                   <td
                     className={`p-3 text-sm font-semibold ${
                       t.type === "income" ? "text-green-600" : "text-red-600"

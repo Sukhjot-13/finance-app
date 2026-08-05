@@ -51,6 +51,7 @@ export default function AddTransactionDrawer({
   const [isAddingNewCategory, setIsAddingNewCategory] = useState(false);
   const [date, setDate] = useState(formatDateForInput(new Date()));
   const [description, setDescription] = useState("");
+  const [excludeFromBudget, setExcludeFromBudget] = useState(false);
 
   const [categories, setCategories] = useState({ expense: [], income: [], allCustom: [] });
   const [loading, setLoading] = useState(false);
@@ -129,6 +130,7 @@ export default function AddTransactionDrawer({
           // where the server runs. Noon (not midnight) avoids DST edge cases.
           date: new Date(date + "T12:00:00"),
           description,
+          excludeFromBudget,
         }),
       });
 
@@ -155,6 +157,7 @@ export default function AddTransactionDrawer({
     setIsAddingNewCategory(false);
     setDate(formatDateForInput(new Date()));
     setDescription("");
+    setExcludeFromBudget(false);
     setError("");
     onClose();
   };
@@ -315,6 +318,25 @@ export default function AddTransactionDrawer({
                   className="mt-1 w-full px-3 py-2 border border-slate-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
                 />
               </div>
+
+              {type === "expense" && (
+                <label className="flex items-start gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={excludeFromBudget}
+                    onChange={(e) => setExcludeFromBudget(e.target.checked)}
+                    className="mt-0.5 h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                  />
+                  <span>
+                    <span className="block text-sm font-medium text-slate-700">
+                      One-time expense
+                    </span>
+                    <span className="block text-xs text-slate-500">
+                      Don't count this in my monthly budget
+                    </span>
+                  </span>
+                </label>
+              )}
             </form>
 
             <div className="p-4 border-t bg-slate-50">

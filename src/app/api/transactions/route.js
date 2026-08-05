@@ -38,7 +38,7 @@ export async function POST(req) {
     const body = await req.json();
     
     // Input validation
-    const { type, amount, category, date, description } = body;
+    const { type, amount, category, date, description, excludeFromBudget } = body;
     
     if (!type || !['income', 'expense'].includes(type)) {
       return NextResponse.json(
@@ -85,6 +85,9 @@ export async function POST(req) {
       category: category.trim(),
       date: userDate,
       description: description ? description.trim() : '',
+      // Always persist the flag (Boolean() coerces undefined -> false), so a
+      // client that doesn't send it still gets a deterministic value.
+      excludeFromBudget: Boolean(excludeFromBudget),
       userId: user._id
     };
     

@@ -24,13 +24,16 @@ export async function GET(req) {
     // Get all budgets for this month
     const budgets = await Budget.find({ userId: user._id, month: monthKey }).lean();
 
-    // Get expense totals per category for this month
+    // Get expense totals per category for this month. One-time expenses
+    // flagged excludeFromBudget are skipped — they're real spending but the
+    // user doesn't want them counted against monthly budgets.
     const spending = await Transaction.aggregate([
       {
         $match: {
           userId,
           type: "expense",
           date: { $gte: startOfMonth },
+          excludeFromBudget: { $ne: true },
         },
       },
       {
@@ -47,6 +50,26 @@ export async function GET(req) {
       spendingMap[s._id] = s.spent;
       totalSpent += s.spent;
     });
+
+    // Sum of one-time expenses excluded from the budget this month, so the UI
+    // can show what was skipped.
+    const excludedResult = await Transaction.aggregate([
+      {
+        $match: {
+          userId,
+          type: "expense",
+          date: { $gte: startOfMonth },
+          excludeFromBudget: true,
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          spent: { $sum: "$amount" },
+        },
+      },
+    ]);
+    const excludedSpent = excludedResult.length > 0 ? excludedResult[0].spent : 0;
 
     // Separate overall budget from per-category budgets
     const overallBudgetEntry = budgets.find((b) => b.category === OVERALL_CATEGORY);
@@ -80,7 +103,7 @@ export async function GET(req) {
       };
     });
 
-    return NextResponse.json({ overall, progress, totalSpent }, { status: 200 });
+    return NextResponse.json({ overall, progress, totalSpent, excludedSpent }, { status: 200 });
   } catch (error) {
     console.error("Budget progress API Error:", error);
     return NextResponse.json({ message: "Server error" }, { status: 500 });

@@ -6,6 +6,9 @@
 
 ## 🟢 Improvements
 
+### Invalid `indexes` option in Transaction schema (2026-08-05)
+`src/models/transaction.model.js` passes `indexes: [...]` inside the schema options object — that is not a valid Mongoose option, so the two compound indexes (`{userId, date}`, `{userId, type, date}`) are **never created**. Should be converted to `TransactionSchema.index(...)` calls (the pattern used in `budget.model.js` and `category.model.js`). Single-field `index: true` on `userId` works fine. Worth fixing for query performance as data grows.
+
 ### Toast notifications instead of `alert()`
 Several places use `alert()` and `window.confirm()` (profile save, transaction delete, edit errors). A small toast component would feel much more polished.
 

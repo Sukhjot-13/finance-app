@@ -41,6 +41,13 @@ const TransactionSchema = new mongoose.Schema(
       trim: true,
       maxlength: [200, "Description cannot exceed 200 characters"]
     },
+    // One-time/sudden expenses that should not count toward monthly budget
+    // progress. Consumers read it with truthy checks so pre-existing documents
+    // (which lack the field entirely) behave as false.
+    excludeFromBudget: {
+      type: Boolean,
+      default: false,
+    },
   },
   { 
     timestamps: true,

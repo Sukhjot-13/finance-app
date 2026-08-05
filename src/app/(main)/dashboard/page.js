@@ -152,6 +152,11 @@ export default function DashboardPage() {
                     <div>
                       <p className="font-medium capitalize text-slate-700">
                         {t.description || t.category}
+                        {t.excludeFromBudget && (
+                          <span className="ml-2 align-middle text-xs text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
+                            One-time
+                          </span>
+                        )}
                       </p>
                       <p className="text-sm text-slate-500">
                         {formatDate(t.date)}
