@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useContext } from "react";
+import { useState, useEffect, useCallback, useContext } from "react";
 import { motion } from "framer-motion";
 import { formatCurrency } from "@/lib/utils";
 import api from "@/lib/api";
@@ -9,9 +9,13 @@ import { UserContext } from "@/app/(main)/layout";
 export default function BudgetProgress() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [loadFailed, setLoadFailed] = useState(false);
+  // Bump to re-run the fetch (Retry button / refresh after budget edits).
+  const [attempt, setAttempt] = useState(0);
   const { user } = useContext(UserContext);
 
   useEffect(() => {
+    let cancelled = false;
     // Client-local month window + month key so the server compares against
     // the budget month the user actually means (and ignores future dates).
     const now = new Date();
@@ -25,10 +29,33 @@ export default function BudgetProgress() {
         if (!res.ok) throw new Error("Failed to load budget progress");
         return res.json();
       })
-      .then((data) => setData(data))
-      .catch(console.error)
-      .finally(() => setLoading(false));
-  }, []);
+      .then((data) => {
+        if (cancelled) return;
+        setData(data);
+        setLoadFailed(false);
+      })
+      .catch((err) => {
+        console.error(err);
+        if (!cancelled) {
+          setData(null);
+          setLoadFailed(true);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [attempt]);
+
+  // Retry is user-initiated: reset the visible states here, then bump
+  // `attempt` so the fetch effect re-runs.
+  const retry = () => {
+    setLoading(true);
+    setLoadFailed(false);
+    setAttempt((n) => n + 1);
+  };
 
   const fmt = (amount) => formatCurrency(amount, user?.currency);
 
@@ -38,6 +65,22 @@ export default function BudgetProgress() {
         {[1, 2, 3].map((i) => (
           <div key={i} className="h-10 bg-slate-200 rounded" />
         ))}
+      </div>
+    );
+  }
+
+  if (loadFailed) {
+    return (
+      <div className="bg-white p-5 rounded-xl shadow-sm flex items-center justify-between gap-3">
+        <p className="text-sm text-red-700">
+          Couldn&apos;t load your budgets. Please try again.
+        </p>
+        <button
+          onClick={retry}
+          className="shrink-0 text-indigo-600 hover:text-indigo-800 underline text-sm font-medium"
+        >
+          Retry
+        </button>
       </div>
     );
   }

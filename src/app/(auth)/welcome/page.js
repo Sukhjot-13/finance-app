@@ -11,6 +11,21 @@ export default function WelcomePage() {
   const [error, setError] = useState("");
   const router = useRouter();
 
+  // Marks onboarding complete on the server so this screen is shown once —
+  // skipping without it would bounce the user back here on every login.
+  const completeOnboarding = async () => {
+    try {
+      await api("/api/user", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ onboarded: true }),
+      });
+    } catch {
+      // Non-fatal: worst case the user sees this screen one more time.
+    }
+    router.push("/dashboard");
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
@@ -19,10 +34,10 @@ export default function WelcomePage() {
       const res = await api("/api/user", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ accountName }),
+        body: JSON.stringify({ accountName, onboarded: true }),
       });
       if (!res.ok) {
-        const data = await res.json();
+        const data = await res.json().catch(() => ({}));
         throw new Error(data.message || "Failed to set account name.");
       }
       router.push("/dashboard");
@@ -35,7 +50,7 @@ export default function WelcomePage() {
 
   const skip = () => {
     // No name is fine — dashboard works without one.
-    router.push("/dashboard");
+    completeOnboarding();
   };
 
   return (

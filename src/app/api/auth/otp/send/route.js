@@ -128,6 +128,9 @@ export async function POST(request) {
             <p style="font-size: 14px; color: #777;">This code will expire in 10 minutes.</p>
         </div>
     `;
+    // Plain-text alternative: some clients and spam filters penalize
+    // HTML-only mail, and this keeps the code readable when HTML is blocked.
+    sendSmtpEmail.textContent = `Your FinTrack login code is ${otp}. It expires in 10 minutes.`;
 
     try {
       // Send the email

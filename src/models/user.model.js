@@ -32,6 +32,12 @@ const UserSchema = new mongoose.Schema(
       type: String,
       default: null,
     },
+    // Set once the user finishes OR deliberately skips /welcome. Without it,
+    // "skip" users (accountName stays null) were re-prompted on every login.
+    onboarded: {
+      type: Boolean,
+      default: false,
+    },
     otp: {
       type: String,
     },

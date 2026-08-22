@@ -1,4 +1,4 @@
-// src/lib/__tests__/utils.test.js
+// test/suites/utils.suite.js — src/lib/utils.js
 import { describe, it, expect } from "vitest";
 import {
   formatCurrency,
@@ -12,9 +12,7 @@ describe("formatCurrency", () => {
   });
 
   it("formats INR with lakh grouping (en-IN)", () => {
-    const formatted = formatCurrency(250000, "INR");
-    expect(formatted).toContain("₹");
-    expect(formatted).toBe("₹2,50,000.00");
+    expect(formatCurrency(250000, "INR")).toBe("₹2,50,000.00");
   });
 
   it("treats null/undefined as zero", () => {
@@ -32,10 +30,10 @@ describe("formatCurrency", () => {
 });
 
 describe("formatDate", () => {
-  it('formats an ISO date as "Month Day, Year"', () => {
-    // Use a UTC-noon instant so the expected calendar date is stable
-    // regardless of the machine's local timezone offset.
-    expect(formatDate("2026-03-07T12:00:00Z")).toMatch(/March 7, 2026|March 6, 2026/);
+  it("formats an ISO date as 'Month Day, Year'", () => {
+    expect(formatDate("2026-03-07T12:00:00Z")).toMatch(
+      /March 7, 2026|March 6, 2026/
+    );
   });
 
   it("returns empty string for null/undefined/invalid input", () => {
@@ -47,18 +45,16 @@ describe("formatDate", () => {
 
 describe("formatDateForInput", () => {
   it("produces YYYY-MM-DD using LOCAL date parts", () => {
-    const d = new Date(2026, 0, 9); // local Jan 9 2026
-    expect(formatDateForInput(d)).toBe("2026-01-09");
+    expect(formatDateForInput(new Date(2026, 0, 9))).toBe("2026-01-09");
   });
 
   it("pads single-digit months and days", () => {
-    const d = new Date(2026, 3, 4); // local Apr 4 2026
-    expect(formatDateForInput(d)).toBe("2026-04-04");
+    expect(formatDateForInput(new Date(2026, 3, 4))).toBe("2026-04-04");
   });
 
   it("returns empty string for missing or non-Date values", () => {
     expect(formatDateForInput(null)).toBe("");
     expect(formatDateForInput(undefined)).toBe("");
-    expect(formatDateForInput("2026-01-01")).toBe(""); // strings are rejected by design
+    expect(formatDateForInput("2026-01-01")).toBe("");
   });
 });

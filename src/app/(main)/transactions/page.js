@@ -1,15 +1,16 @@
 // src/app/(main)/transactions/page.js
 "use client";
 
-import { useState, useEffect, useContext } from "react";
+import { useState, useEffect, useContext, useRef } from "react";
 import { formatCurrency, formatDate, formatDateForInput } from "@/lib/utils";
 import api from "@/lib/api";
+import { useDialogA11y } from "@/lib/useDialogA11y";
 import { Trash2, Edit, X, ChevronDown } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { UserContext } from "@/app/(main)/layout";
 
-// Edit Transaction Modal Component
-function EditTransactionModal({ transaction, onClose, onSave }) {
+// Edit Transaction Modal Component (exported for tests)
+export function EditTransactionModal({ transaction, onClose, onSave }) {
   // Normalize the stored date to "YYYY-MM-DD" (local timezone) so the date
   // input shows exactly the date the user sees in the list. Dates are stored
   // as instants, so they must be converted with the viewer's local getters.
@@ -22,6 +23,11 @@ function EditTransactionModal({ transaction, onClose, onSave }) {
   const [isAddingNewCategory, setIsAddingNewCategory] = useState(false);
   const [modalError, setModalError] = useState("");
   const [saving, setSaving] = useState(false);
+  const panelRef = useRef(null);
+
+  // Escape closes, focus is trapped inside, body scroll locks while open,
+  // and focus returns to the trigger on close (shared overlay behavior).
+  useDialogA11y({ ref: panelRef, isOpen: true, onClose });
 
   useEffect(() => {
     const fetchCategories = async () => {
@@ -36,20 +42,6 @@ function EditTransactionModal({ transaction, onClose, onSave }) {
     };
     fetchCategories();
   }, [transaction]);
-
-  // Escape closes the modal; body scroll is locked while it's open.
-  useEffect(() => {
-    const onKey = (e) => {
-      if (e.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", onKey);
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.removeEventListener("keydown", onKey);
-      document.body.style.overflow = previousOverflow;
-    };
-  }, [onClose]);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -128,10 +120,14 @@ function EditTransactionModal({ transaction, onClose, onSave }) {
       className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
     >
       <motion.div
+        ref={panelRef}
         initial={{ y: -50, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
         exit={{ y: -50, opacity: 0 }}
         className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Edit Transaction"
       >
         <div className="flex justify-between items-center mb-4">
           <h2 className="text-xl font-bold">Edit Transaction</h2>
@@ -179,6 +175,7 @@ function EditTransactionModal({ transaction, onClose, onSave }) {
                 step="0.01"
                 min="0.01"
                 required
+                data-autofocus
               />
             </div>
             <div>
@@ -494,7 +491,13 @@ export default function TransactionsPage() {
       if (!res.ok) throw new Error("Delete failed");
       setDeletingId(null);
       setError("");
-      refetchCurrentPage();
+      // If this was the only row on a page past the first, stepping back
+      // avoids stranding the user on an empty page ("Page 3 of 2").
+      if (transactions.length === 1 && page > 1) {
+        setPage((p) => Math.max(p - 1, 1));
+      } else {
+        refetchCurrentPage();
+      }
     } catch (err) {
       console.error("Error deleting transaction:", err);
       setError("Failed to delete transaction.");

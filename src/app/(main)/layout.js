@@ -100,6 +100,8 @@ function Sidebar({ isOpen, onClose }) {
 
 function ProfileDropdown() {
   const [isOpen, setIsOpen] = useState(false);
+  // Two-step confirm so one stray click can't log the user out.
+  const [confirmingLogout, setConfirmingLogout] = useState(false);
   const { user } = useContext(UserContext);
   const router = useRouter();
   const menuRef = useRef(null);
@@ -123,6 +125,11 @@ function ProfileDropdown() {
     };
   }, [isOpen]);
 
+  const closeMenu = () => {
+    setConfirmingLogout(false);
+    setIsOpen(false);
+  };
+
   const handleLogout = async () => {
     try {
       await api("/api/auth/logout", { method: "POST" });
@@ -138,7 +145,10 @@ function ProfileDropdown() {
   return (
     <div className="relative" ref={menuRef}>
       <button
-        onClick={() => setIsOpen(!isOpen)}
+        onClick={() => {
+          if (isOpen) setConfirmingLogout(false);
+          setIsOpen(!isOpen);
+        }}
         aria-haspopup="menu"
         aria-expanded={isOpen}
         aria-label="Account menu"
@@ -158,21 +168,48 @@ function ProfileDropdown() {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -10 }}
             className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg py-1 z-50 border border-slate-200"
+            role="menu"
           >
             <Link
               href="/profile"
-              onClick={() => setIsOpen(false)}
+              onClick={closeMenu}
               className="block px-4 py-2 text-sm text-slate-700 hover:bg-slate-100"
+              role="menuitem"
             >
               Profile
             </Link>
-            <button
-              onClick={handleLogout}
-              className="block w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-100"
-            >
-              <LogOut className="inline mr-2" size={16} />
-              Logout
-            </button>
+            {confirmingLogout ? (
+              <div className="px-4 py-2 border-t border-slate-100">
+                <p className="text-xs text-slate-600 mb-2">
+                  Log out of FinTrack on this device?
+                </p>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleLogout}
+                    className="flex-1 text-xs font-medium text-white bg-red-600 hover:bg-red-700 px-2 py-1.5 rounded-md"
+                    role="menuitem"
+                  >
+                    Yes, log out
+                  </button>
+                  <button
+                    onClick={() => setConfirmingLogout(false)}
+                    className="text-xs text-slate-500 hover:text-slate-700 px-2 py-1.5 rounded-md hover:bg-slate-100"
+                    role="menuitem"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                onClick={() => setConfirmingLogout(true)}
+                className="block w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-100"
+                role="menuitem"
+              >
+                <LogOut className="inline mr-2" size={16} />
+                Logout
+              </button>
+            )}
           </motion.div>
         )}
       </AnimatePresence>

@@ -1,11 +1,12 @@
 // src/components/AddTransactionDrawer.js
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { X, Plus, Minus } from "lucide-react";
 import api from "@/lib/api";
-import { formatDateForInput } from "@/lib/utils"; // We will create this helper function
+import { formatDateForInput } from "@/lib/utils";
+import { useDialogA11y } from "@/lib/useDialogA11y";
 
 // A custom segmented control for a nicer UI
 function SegmentedControl({ value, onChange, options }) {
@@ -57,6 +58,7 @@ export default function AddTransactionDrawer({
   const [categories, setCategories] = useState({ expense: [], income: [], allCustom: [] });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const panelRef = useRef(null);
 
   const fetchCategories = () => {
     api("/api/categories")
@@ -152,7 +154,9 @@ export default function AddTransactionDrawer({
       });
 
       if (!res.ok) {
-        const errData = await res.json();
+        // .catch(() => ({})) keeps a non-JSON error body (host 502 page,
+        // HTML error) from surfacing as "Unexpected token" gibberish.
+        const errData = await res.json().catch(() => ({}));
         throw new Error(errData.message || "Failed to add transaction.");
       }
 
@@ -182,20 +186,7 @@ export default function AddTransactionDrawer({
     onClose();
   }, [resetForm, onClose]);
 
-  // Escape closes the drawer; body scroll is locked while it's open.
-  useEffect(() => {
-    if (!isOpen) return undefined;
-    const onKey = (e) => {
-      if (e.key === "Escape") handleClose();
-    };
-    document.addEventListener("keydown", onKey);
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.removeEventListener("keydown", onKey);
-      document.body.style.overflow = previousOverflow;
-    };
-  }, [isOpen, handleClose]);
+  useDialogA11y({ ref: panelRef, isOpen, onClose: handleClose });
 
   const currentCategories =
     type === "expense" ? categories.expense : categories.income;
@@ -210,13 +201,18 @@ export default function AddTransactionDrawer({
             exit={{ opacity: 0 }}
             onClick={handleClose}
             className="fixed inset-0 bg-black/50 z-40"
+            aria-hidden="true"
           />
           <motion.div
+            ref={panelRef}
             initial={{ x: "100%" }}
             animate={{ x: 0 }}
             exit={{ x: "100%" }}
             transition={{ type: "spring", stiffness: 300, damping: 30 }}
             className="fixed top-0 right-0 bottom-0 w-full max-w-md bg-white z-50 shadow-2xl flex flex-col"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Add Transaction"
           >
             <div className="flex items-center justify-between p-4 border-b">
               <h2 className="text-lg font-semibold text-slate-800">
@@ -274,6 +270,7 @@ export default function AddTransactionDrawer({
                   value={amount}
                   onChange={(e) => setAmount(e.target.value)}
                   placeholder="0.00"
+                  data-autofocus
                   className="mt-1 w-full px-3 py-2 border border-slate-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
                 />
               </div>

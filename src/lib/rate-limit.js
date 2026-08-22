@@ -10,22 +10,14 @@
 // database is unreachable — a rate limiter must never become the thing that
 // locks everyone out of the app during an incident.
 
-const RateLimitModel = () =>
-  import("@/models/ratelimit.model").then((m) => m.default);
-
-async function ready() {
-  const RateLimit = await RateLimitModel();
-  const dbConnect = (await import("./mongodb")).default;
-  await dbConnect();
-  return RateLimit;
-}
+import dbConnect from "@/lib/mongodb";
+import RateLimit from "@/models/ratelimit.model";
 
 /**
  * Records one hit for `key`. Keeps at most the last 100 timestamps per key.
  */
 export async function recordHit(key, windowMs) {
   try {
-    const RateLimit = await ready();
     const now = new Date();
     await RateLimit.updateOne(
       { key },
@@ -45,7 +37,6 @@ export async function recordHit(key, windowMs) {
  */
 export async function countRecentHits(key, windowMs) {
   try {
-    const RateLimit = await ready();
     const cutoff = new Date(Date.now() - windowMs);
     const result = await RateLimit.aggregate([
       { $match: { key } },
@@ -76,7 +67,6 @@ export async function countRecentHits(key, windowMs) {
  */
 export async function popLastHit(key) {
   try {
-    const RateLimit = await ready();
     await RateLimit.updateOne({ key }, { $pop: { hits: 1 } });
   } catch (error) {
     console.error("rate-limit popLastHit error:", error.message);
@@ -88,7 +78,6 @@ export async function popLastHit(key) {
  */
 export async function resetKey(key) {
   try {
-    const RateLimit = await ready();
     await RateLimit.deleteOne({ key });
   } catch (error) {
     console.error("rate-limit resetKey error:", error.message);

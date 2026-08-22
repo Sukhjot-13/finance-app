@@ -56,9 +56,16 @@ export async function PUT(req) {
             );
         }
 
+        // Onboarding can only be COMPLETED from the client (never revoked),
+        // so skipped users aren't re-prompted on every login.
+        const wantsOnboard =
+          body.onboarded === true ||
+          (typeof body.accountName === "string" && Boolean(body.accountName.trim()));
+
         const fieldsToUpdate = {};
         if (accountName) fieldsToUpdate.accountName = accountName;
         if (currency) fieldsToUpdate.currency = currency;
+        if (wantsOnboard) fieldsToUpdate.onboarded = true;
 
         if (Object.keys(fieldsToUpdate).length === 0) {
             return NextResponse.json({ message: "No fields to update" }, { status: 400 });

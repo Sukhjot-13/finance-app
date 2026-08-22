@@ -20,6 +20,8 @@ export default function CategoriesPage() {
   const [savingRename, setSavingRename] = useState(false);
   const [error, setError] = useState("");
 
+  // Single source of truth for loading categories — used by the mount
+  // effect AND the Retry button.
   const fetchCategories = async () => {
     try {
       const res = await api("/api/categories");
@@ -36,27 +38,10 @@ export default function CategoriesPage() {
   };
 
   useEffect(() => {
-    let cancelled = false;
-    api("/api/categories")
-      .then((res) => {
-        if (!res.ok) throw new Error("Failed to fetch categories");
-        return res.json();
-      })
-      .then((data) => {
-        if (cancelled) return;
-        setCategories(data);
-        setFetchFailed(false);
-      })
-      .catch((error) => {
-        console.error("Failed to fetch categories:", error);
-        if (!cancelled) setFetchFailed(true);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
+    // All setState inside fetchCategories happens after awaits; the rule
+    // can't see across the function boundary, hence the targeted disable.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    fetchCategories();
   }, []);
 
   // Only show custom categories (no built-in defaults)
@@ -78,7 +63,7 @@ export default function CategoriesPage() {
     try {
       const res = await api(`/api/categories/${id}`, { method: "DELETE" });
       if (!res.ok) {
-        const data = await res.json();
+        const data = await res.json().catch(() => ({}));
         setError(data.message || "Failed to delete category");
         setDeletingId(null);
         return;
@@ -140,7 +125,7 @@ export default function CategoriesPage() {
         body: JSON.stringify({ name: newName.trim(), type: newType }),
       });
       if (!res.ok) {
-        const data = await res.json();
+        const data = await res.json().catch(() => ({}));
         setError(data.message || "Failed to create category");
         setSaving(false);
         return;

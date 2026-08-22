@@ -1,7 +1,7 @@
 // src/app/(main)/dashboard/page.js
 "use client";
 
-import { useState, useEffect, useContext } from "react"; // Import useContext
+import { useState, useEffect, useCallback, useContext, useRef } from "react";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { Plus, TrendingUp, TrendingDown, PiggyBank, Wallet } from "lucide-react";
 import AddTransactionDrawer from "@/components/AddTransactionDrawer";
@@ -63,33 +63,35 @@ export default function DashboardPage() {
   const [budgetVersion, setBudgetVersion] = useState(0);
   const { user } = useContext(UserContext); // Get user data from context
 
-  // Client-local month window shared by the mount fetch and refetches.
-  const now = new Date();
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-  const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+  // Sequence guard: only the LATEST fetch may write state, so a slow
+  // background refetch can never clobber a newer one.
+  const fetchSeq = useRef(0);
 
-  const fetchData = async () => {
+  // Single source of truth for dashboard data. The month window is computed
+  // per call (client-local start AND end) so a tab left open across a month
+  // boundary picks up the new window when it refetches.
+  const fetchData = useCallback(async () => {
+    const seq = ++fetchSeq.current;
     try {
-      // Send the client's local month start AND end so the server window
-      // matches the user's calendar regardless of where the server runs,
-      // and future-dated transactions stay out of this month.
+      const now = new Date();
+      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+      const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1);
       const res = await api(
         `/api/reports/dashboard?start=${encodeURIComponent(monthStart.toISOString())}&end=${encodeURIComponent(monthEnd.toISOString())}`
       );
       if (!res.ok) throw new Error("Failed to fetch dashboard data");
       const result = await res.json();
-      setData(result);
+      if (fetchSeq.current === seq) setData(result);
     } catch (error) {
       console.error(error);
-      setData(null);
+      if (fetchSeq.current === seq) setData(null);
     } finally {
-      setLoading(false);
+      if (fetchSeq.current === seq) setLoading(false);
     }
-  };
+  }, []);
 
   // Event-triggered refetch (e.g. after adding a transaction): re-show the
-  // skeleton first, then load. Kept out of fetchData so the mount effect
-  // stays free of synchronous setState.
+  // skeleton first, then load.
   const refreshWithSkeleton = () => {
     setLoading(true);
     setData(null);
@@ -97,29 +99,20 @@ export default function DashboardPage() {
   };
 
   useEffect(() => {
-    let cancelled = false;
-    api(
-      `/api/reports/dashboard?start=${encodeURIComponent(monthStart.toISOString())}&end=${encodeURIComponent(monthEnd.toISOString())}`
-    )
-      .then((res) => {
-        if (!res.ok) throw new Error("Failed to fetch dashboard data");
-        return res.json();
-      })
-      .then((result) => {
-        if (!cancelled) setData(result);
-      })
-      .catch((error) => {
-        console.error(error);
-        if (!cancelled) setData(null);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
+    // fetchData defers all setState until after its first await; the rule
+    // can't see across the function boundary, hence the targeted disable.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    fetchData();
+
+    // U4: refresh silently when the tab becomes visible again — covers the
+    // "left open overnight, now it's next month" staleness case.
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") fetchData();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () =>
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+  }, [fetchData]);
 
   if (loading) {
     return <DashboardSkeleton />;

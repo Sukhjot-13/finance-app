@@ -37,7 +37,15 @@ async function findUserByEmail(email) {
 }
 
 export async function POST(req) {
-  const { email, otp } = await req.json();
+  // Parse inside try: a malformed body must be a controlled 400, never an
+  // unhandled throw that surfaces as a framework 500.
+  let email;
+  let otp;
+  try {
+    ({ email, otp } = await req.json());
+  } catch {
+    return sendError("Invalid request body.", 400);
+  }
 
   if (!email || !otp) {
     return sendError("Email and OTP are required.", 400);
@@ -119,7 +127,9 @@ export async function POST(req) {
       sameSite: "strict",
     });
 
-    const isNewUser = !user.accountName;
+    // New = no name AND onboarding never completed (skip counts as done),
+    // so "Skip for now" users go straight to the dashboard on later logins.
+    const isNewUser = !user.accountName && !user.onboarded;
 
     return sendSuccess({
       message: "Login successful.",

@@ -34,24 +34,40 @@ export async function POST(req) {
     const body = await req.json();
     const { category, amount, month } = body;
 
-    if (!category || !amount || !month) {
+    // Strict type/format guards — don't trust client coercion ("50" < 1
+    // string-compares as false, and schema validators only run on the
+    // upsert-INSERT path, not the update path).
+    if (
+      !category ||
+      typeof category !== "string" ||
+      !category.trim() ||
+      category.trim().length > 50
+    ) {
       return NextResponse.json(
-        { message: "Category, amount, and month are required" },
+        { message: "Category is required (50 characters max)" },
         { status: 400 }
       );
     }
 
-    if (amount < 1) {
+    if (typeof month !== "string" || !/^\d{4}-\d{2}$/.test(month)) {
       return NextResponse.json(
-        { message: "Budget must be at least 1" },
+        { message: "Month must be in YYYY-MM format" },
+        { status: 400 }
+      );
+    }
+
+    const amountNum = Number(amount);
+    if (!Number.isFinite(amountNum) || amountNum < 1) {
+      return NextResponse.json(
+        { message: "Budget must be a number of at least 1" },
         { status: 400 }
       );
     }
 
     // Upsert: create if not exists, update if does
     const budget = await Budget.findOneAndUpdate(
-      { userId: user._id, category, month },
-      { amount },
+      { userId: user._id, category: category.trim(), month },
+      { amount: amountNum },
       { upsert: true, new: true, runValidators: true }
     );
 

@@ -11,6 +11,11 @@ import mongoose from "mongoose";
 // Renaming cascades: transactions AND monthly budgets are stored by plain
 // category name, so both are re-pointed at the new name — otherwise reports,
 // dropdowns and budget bars would reference a ghost label.
+// The three writes run inside a Mongo TRANSACTION when the deployment
+// supports it (replica set / Atlas). On standalone instances (no txn
+// support) it falls back to sequential writes with best-effort rollback, so
+// a mid-cascade failure no longer leaves transactions pointing at the old
+// name while the category doc holds the new one.
 export async function PUT(request, { params }) {
   const { user, status } = await verifySession();
   if (!user)
@@ -54,6 +59,73 @@ export async function PUT(request, { params }) {
     }
 
     const oldName = category.name;
+    if (oldName === newName) {
+      return NextResponse.json(category, { status: 200 });
+    }
+
+    // --- Transactional path ---
+    let session = null;
+    try {
+      const candidate = await mongoose.startSession();
+      // Without an active connection (or on very old drivers) a session may
+      // come back without transaction support — treat that as standalone.
+      if (candidate && typeof candidate.withTransaction === "function") {
+        session = candidate;
+      } else if (candidate?.endSession) {
+        candidate.endSession();
+      }
+    } catch {
+      session = null;
+    }
+
+    if (session) {
+      try {
+        let committed = false;
+        await session.withTransaction(async () => {
+          category.name = newName;
+          await category.save({ session });
+          await Transaction.updateMany(
+            { userId: user._id, category: oldName },
+            { $set: { category: newName } },
+            { session }
+          );
+          await Budget.updateMany(
+            { userId: user._id, category: oldName },
+            { $set: { category: newName } },
+            { session }
+          );
+          committed = true;
+        });
+        session.endSession();
+        // Re-read outside the aborted/committed session context.
+        const fresh = committed
+          ? await Category.findById(category._id)
+          : null;
+        return NextResponse.json(fresh || category, { status: 200 });
+      } catch (txError) {
+        session.endSession();
+        if (txError.code === 11000) {
+          return NextResponse.json(
+            { message: "A category with this name already exists" },
+            { status: 409 }
+          );
+        }
+        const msg = String(txError?.message || "");
+        const unsupported =
+          /replica set/i.test(msg) ||
+          /transaction/i.test(msg) && /not (supported|enabled)/i.test(msg);
+        if (!unsupported) {
+          console.error("Category rename error:", txError.message);
+          return NextResponse.json(
+            { message: "Error updating category" },
+            { status: 500 }
+          );
+        }
+        // Unsupported here → sequential fallback below.
+      }
+    }
+
+    // --- Sequential fallback with best-effort rollback ---
     category.name = newName;
     try {
       await category.save();
@@ -67,7 +139,7 @@ export async function PUT(request, { params }) {
       throw saveError;
     }
 
-    if (oldName !== newName) {
+    try {
       await Transaction.updateMany(
         { userId: user._id, category: oldName },
         { $set: { category: newName } }
@@ -76,6 +148,18 @@ export async function PUT(request, { params }) {
         { userId: user._id, category: oldName },
         { $set: { category: newName } }
       );
+    } catch (cascadeError) {
+      // Roll back the rename so nothing references a label that doesn't
+      // exist yet. If even the rollback fails, surface the original error —
+      // retrying the same rename is safe either way.
+      console.error("Rename cascade failed, rolling back:", cascadeError.message);
+      category.name = oldName;
+      try {
+        await category.save();
+      } catch (rollbackError) {
+        console.error("Rename rollback failed:", rollbackError.message);
+      }
+      throw cascadeError;
     }
 
     return NextResponse.json(category, { status: 200 });
