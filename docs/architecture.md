@@ -1,9 +1,9 @@
 # Finance App - Architecture Document
 
 ## Overview
-A Next.js 15 personal finance tracking application with OTP-based authentication, transaction management, reporting, and data visualization. Uses MongoDB with Mongoose for data persistence and Brevo (Sendinblue) for email-based OTP delivery.
+A Next.js 16 personal finance tracking application with OTP-based authentication, transaction management, reporting, and data visualization. Uses MongoDB with Mongoose for data persistence and Brevo (Sendinblue) for email-based OTP delivery.
 
-**Tech Stack:** Next.js 16, React 19, MongoDB/Mongoose, Tailwind CSS v4, Chart.js, Framer Motion, Lucide React, Brevo API, JWT (jsonwebtoken + jose)
+**Tech Stack:** Next.js 16, React 19, MongoDB/Mongoose, Tailwind CSS v4, Chart.js, Framer Motion, Lucide React, Brevo API, JWT (jsonwebtoken + jose), Vitest
 
 ---
 
@@ -13,15 +13,15 @@ A Next.js 15 personal finance tracking application with OTP-based authentication
 
 | File | Purpose |
 |------|---------|
-| `/package.json` | Project metadata, scripts (dev/build/start/lint), dependencies |
-| `/next.config.mjs` | Next.js configuration (webpack fallbacks, global security headers) |
+| `/package.json` | Project metadata, scripts (dev/build/start/lint/test), dependencies |
+| `/next.config.mjs` | Next.js configuration (webpack fallbacks, baseline security headers; CSP is set per-request by the proxy) |
+| `/vitest.config.mjs` | Vitest unit-test configuration (`@` alias → `./src`, node environment) |
 | `/postcss.config.mjs` | PostCSS configuration for Tailwind CSS |
 | `/eslint.config.mjs` | ESLint configuration |
 | `/jsconfig.json` | JavaScript/Next.js path aliases (@/ maps to ./src) |
-| `/tailwind.config.js` | Tailwind CSS theme configuration (if exists) |
 | `/README.md` | Project documentation |
 | `/docs/architecture.md` | Project architecture documentation |
-| `/docs/audit.md` | Full-site audit (re-run 2026-08-22): verified broken flows, bugs, edge cases, fix order |
+| `/docs/audit.md` | Audit status (2026-08-22 cycle fully closed — no open items; fix summary table) |
 | `/docs/suggestions.md` | Suggestions / improvement / vulnerability log |
 
 ### Source Code (`/src/`)
@@ -29,60 +29,59 @@ A Next.js 15 personal finance tracking application with OTP-based authentication
 #### App Layout & Entry Points
 
 - **`src/app/layout.js`** - Root layout component. Sets up Inter font, global CSS, and base HTML structure.
-  - `RootLayout()` - Renders `<html>` and `<body>` with Inter font and global styles. Defines metadata (title: "Finance Tracker").
+  - `RootLayout()` - Renders `<html>` and `<body>` with Inter font and global styles. Defines metadata (title: "Finance Tracker"). Exports `dynamic = "force-dynamic"` — REQUIRED so the proxy-generated CSP nonce is stamped onto Next's inline bootstrap scripts in production builds (static prerendering cannot carry per-request nonces).
 
 - **`src/app/page.js`** - Root page (entry point at `/`). Checks authentication and redirects.
   - `RootPage()` (async) - Calls `verifyAuth()`. If authenticated, redirects to `/dashboard`. Otherwise redirects to `/login`.
 
 - **`src/app/globals.css`** - Global styles. Imports Tailwind CSS v4 (`@import "tailwindcss"`). Defines `@theme` block (currently commented out). Sets `box-sizing: border-box` globally.
 
-#### Middleware
+#### Middleware (Proxy)
 
-- **`src/proxy.js`** - Next.js Edge Proxy (Middleware) for route protection. Next.js 16 uses the "proxy" convention for what was previously middleware.
-  - `proxy()` - Checks for `refreshToken` cookie. If present and accessing `/login` or `/welcome`, redirects to `/dashboard`. Defines public paths: `/login`, `/welcome`, and `/api` (all API routes excluded from middleware — they handle their own auth with proper 401 responses). If no `refreshToken` and accessing protected route, redirects to `/login`. Config: runs on all paths except `_next/static`, `_next/image`, `favicon.ico`, **and any path with a file extension** (public assets like `/a.svg` are served without auth redirects).
+- **`src/proxy.js`** - Next.js Proxy (Middleware) for route protection AND Content-Security-Policy generation.
+  - `buildCsp(nonce)` - Builds the strict CSP string: `script-src 'self' 'nonce-…' 'strict-dynamic'` (+ `'unsafe-eval'` in dev only), `style-src 'self' 'unsafe-inline'` (Chart.js/Framer Motion tuning), locked-down `img/font/connect/object/base-uri/form-action/frame-ancestors`.
+  - `proxy()` - Auth routing: logged-in users hitting `/login` → `/dashboard`. Public paths: `/login`, `/api` (**NOTE: `/welcome` is deliberately NOT in either list** — new users arrive there with fresh cookies after OTP verify and must NOT be bounced; anonymous visitors are redirected to `/login` by the protected-path check). `/api/*` requests pass through untouched (routes self-auth). Page requests get a per-request CSP nonce: sets `x-nonce` + `Content-Security-Policy` on the REQUEST headers (so Next stamps the nonce onto its own scripts) and on the response. Config matcher: all paths except `_next/static`, `_next/image`, `favicon.ico`, any path with a file extension.
 
 ---
 
 ### Auth Module (`/src/app/(auth)/`)
 
 - **`src/app/(auth)/login/page.js`** - Login page with OTP flow ("use client").
-  - `LoginPage()` - Two-step form: Step 1 collects email, calls `/api/auth/otp/send`. Step 2 collects OTP, calls `/api/auth/otp/verify`. On success, redirects based on `isNewUser` flag (new users → `/welcome`, returning → `/dashboard`). **Auto-redirects on mount** if already authenticated (checks `GET /api/user`, redirects to `/dashboard` on success). State: `email`, `otp`, `step`, `loading`, `error`, `checkingSession`. Uses `useRouter` for navigation. NOTE: uses raw `fetch()` deliberately — the `api()` wrapper's failed-refresh redirect to `/login` would loop on this page.
+  - `LoginPage()` - Two-step form: Step 1 collects email, calls `/api/auth/otp/send` (surfaces the server's specific error messages, e.g. rate-limit). Step 2 collects OTP (numeric input, `autoComplete="one-time-code"`) with auto-submit at 6 digits, a **Resend code button with a 30s cooldown**, and "Use a different email". On success, redirects based on `isNewUser` (new → `/welcome`, returning → `/dashboard`). Auto-redirects on mount if already authenticated. State: `email`, `otp`, `step`, `loading`, `error`, `checkingSession`, `resendIn`. Uses raw `fetch()` deliberately — the `api()` wrapper's failed-refresh redirect to `/login` would loop on this page.
 
 - **`src/app/(auth)/welcome/page.js`** - Welcome/onboarding page for new users ("use client").
-  - `WelcomePage()` - Collects `accountName` via form, submits to `PUT /api/user` via the `api()` wrapper. On success, redirects to `/dashboard`. State: `accountName`, `loading`, `error`.
+  - `WelcomePage()` - Collects `accountName` (maxLength 60) via form, submits to `PUT /api/user` via `api()`. Includes a **Skip for now** button that goes straight to `/dashboard`. On success, redirects to `/dashboard`. State: `accountName`, `loading`, `error`.
 
 ---
 
 ### Main App Module (`/src/app/(main)/`)
 
-- **`src/app/(main)/layout.js`** - Main app layout with sidebar, header, and user context ("use client").
-  - `UserContext` - React Context export for sharing user data across main routes.
-  - `Sidebar()` - Navigation sidebar component. Links: Dashboard (`/dashboard`), Transactions (`/transactions`), Reports (`/reports`). Responsive - full sidebar on desktop (lg+), overlay with backdrop on mobile. Animated with Framer Motion. Highlights active route.
-  - `ProfileDropdown()` - User menu dropdown with profile link and logout button. Shows user's `accountName`. Uses `UserContext`. Calls `POST /api/auth/logout` on logout.
-  - `MainLayout()` - Main app shell. Fetches current user via `GET /api/user`. Shows loading spinner (PiggyBank icon bouncing). Provides `UserContext` with user data. Renders sidebar + header + content area. Header shows page title based on pathname and responsive menu toggle. Closes sidebar on mobile route change.
+- **`src/app/(main)/layout.js`** - Main app shell with sidebar, header, and user context ("use client").
+  - `UserContext` - React Context exporting `{ user, setUser }`. Pages call `setUser` (e.g. profile save) so currency/name changes propagate app-wide without a reload.
+  - `Sidebar()` - Nav sidebar (Dashboard/Transactions/Reports/Categories). Responsive overlay on mobile, animated via Framer Motion, active-route highlight.
+  - `ProfileDropdown()` - User menu with Profile link and logout. Closes on **outside click and Escape**; button has `aria-haspopup`/`aria-expanded`. Shows `user.accountName`; calls `POST /api/auth/logout`.
+  - `MainLayout()` - Fetches user via `GET /api/user`. On transient failure shows an inline **retry card** instead of redirecting (definitive auth failures are handled inside `api()` itself). Sidebar resize handling only reacts to *crossing* the desktop breakpoint (manual collapse within a mode is preserved); route changes close the mobile sidebar via React's render-time-adjustment pattern (no setState-in-effect).
 
 - **`src/app/(main)/dashboard/page.js`** - Dashboard page ("use client").
-  - `StatCard()` - Reusable stat card component with icon, title, and formatted value. Props: `title`, `value`, `icon: Icon`, `colorClass`.
-  - `DashboardSkeleton()` - Loading skeleton with animated pulse placeholders.
-  - `DashboardPage()` - Main dashboard. Fetches data from `GET /api/reports/dashboard?start=<local month start ISO>` via the `api()` wrapper — the client's local month start is sent so the server window matches the user's calendar regardless of server timezone. Displays 3 stat cards (Current Balance, Income This Month, Expenses This Month) using `UserContext` currency. Shows recent transactions (up to 5) with an amber "One-time" chip on flagged transactions, and expense breakdown pie chart (via `SimpleChart`). Includes budget progress section and "Set Budgets" button. Bottom padding (`pb-20` mobile) prevents FAB overlap. Includes FAB button to open `AddTransactionDrawer`. State: `data`, `loading`. Handles empty data/error states gracefully.
+  - `generateSliceColors(count)` - Curated palette plus golden-angle HSL fallback so any number of pie slices gets a distinct color.
+  - `StatCard()`, `DashboardSkeleton()` - Reusable stat card and loading skeleton.
+  - `DashboardPage()` - Fetches `GET /api/reports/dashboard?start=…&end=…` (client-local month window; END bound keeps future-dated txns out of "this month"). Mount effect uses promise-chain style (no synchronous setState); `refreshWithSkeleton()` re-shows skeletons on event refetches. Adding a transaction refreshes stats **and bumps `budgetVersion`** so budget bars update immediately. Pie chart via `SimpleChart`.
 
-- **`src/app/(main)/transactions/page.js`** - Transactions page ("use client").
-  - `EditTransactionModal()` - Modal for editing a transaction. Fetches categories from `GET /api/categories` via `api()`. Includes an Expense/Income **type toggle** (switching resets the selected category). Supports selecting existing categories or creating new ones via `POST /api/categories`. Saves via `PUT /api/transactions/[id]`, sending **only the editable fields** (type, amount, category, date, description, excludeFromBudget) — never `_id`/`userId`/timestamps. Normalizes the stored date to `YYYY-MM-DD` via `formatDateForInput` (local-timezone getters) so the date input shows the same date as the list, and sends the date back as `new Date(date + "T12:00:00")` (noon in user's local time) on save. "One-time expense" checkbox (`name="excludeFromBudget"`, shown only for expenses); `handleChange` uses `e.target.checked` for checkbox inputs. Modal-level errors (e.g. failed category creation) render inline — no browser dialogs. State: `formData`, `categories`, `newCategory`, `isAddingNewCategory`, `modalError`. Animated with Framer Motion.
-  - `TransactionCard()` - Mobile card component for a single transaction. Shows type badge, category, date, amount, description, an amber "One-time" chip when `excludeFromBudget` is set, and inline confirm-once delete (no browser dialog). Used on screens < 640px.
-  - `TransactionsPage()` - Main transactions page. **Responsive layout**: table view on desktop (≥640px), card list on mobile (<640px). Fetches from `GET /api/transactions` via `api()`. Filters by search, type, category, date range. Desktop table shows an amber "One-time" chip next to the category for flagged transactions. Delete uses **inline confirm**. Errors shown as **inline dismissible banner**. Uses `UserContext` for currency formatting. Loading state uses animated skeleton cards.
-
-- **`src/app/(main)/error.js`** - Route-segment error boundary for `(main)` pages ("use client"). Renders a recoverable "Something went wrong" card with a Try-again button instead of a white screen; logs the error to console.
-
-- **`src/app/error.js`** - Root-level error boundary ("use client"). Same recoverable pattern for page segments below the root layout.
+- **`src/app/(main)/transactions/page.js`** - Transactions page ("use client"). **Server-side filtered + paginated.**
+  - `EditTransactionModal()` - Edit modal with Expense/Income toggle, category select or create (server error messages surfaced; caps: name ≤50, description ≤200, amount min 0.01), date normalized to local `YYYY-MM-DD` and saved as noon-local instant. Save calls `onSave(...)` which returns `{ ok } | { ok:false, message }` — failures render INSIDE the modal (`modalError`) since page banners would be hidden behind the overlay. Escape closes; body scroll locked while open.
+  - `TransactionCard()` - Mobile card for one transaction with inline confirm-once delete.
+  - `TransactionsPage()` - State: `transactions`, `pageInfo {page,totalPages,total}`, `page`, `filters`, debounced `debouncedSearch` (300ms), `categoryOptions` (fetched from `/api/categories`). Fetches `GET /api/transactions?page=&limit=&search=&type=&category=&from=&to=` (from/to are local instants). Filter updates snap back to page 1 (`updateFilter`). Desktop table (with Description column) / mobile cards; result count + Prev/Next pagination when `totalPages > 1`; empty-states distinguish "no transactions" vs "no filter matches".
 
 - **`src/app/(main)/reports/page.js`** - Reports page ("use client").
-  - `ReportsPage()` - Date-range report generator. Date inputs default to the current month using **local-time** formatting (`formatDateForInput`, avoiding the UTC `toISOString()` off-by-one-day bug). Fetches report from `POST /api/reports/generate` via `api()`, sending both the raw date strings and absolute `startInstant`/`endInstant` computed in the browser's timezone. Shows summary cards (Total Income, Total Expenses, Net Savings) and detailed breakdowns. Expense breakdown as bar chart (via `react-chartjs-2 Bar`). Income sources as a list. Uses `UserContext` for currency. State: `startDate`, `endDate`, `report`, `loading`, `error`.
+  - `ReportsPage()` - Validates dates before submit (both present, start ≤ end) with friendly inline errors; sends raw strings + absolute `startInstant`/`endInstant` (browser-timezone). Summary cards + Bar chart + income list. Currency via `UserContext`.
 
-- **`src/app/(main)/categories/page.js`** - Categories management page ("use client").
-  - `CategoriesPage()` - Lists only custom categories (no built-in defaults) with filter tabs (All/Expense/Income). All API calls go through the `api()` wrapper with `res.ok` checks. Supports adding new custom categories and deleting them. Delete uses **inline confirm**; errors shown as **inline dismissible banner**. Built-in default categories are never shown in the list. Shows a "Matches default" badge on custom categories that share a name with a built-in one. Calls `GET /api/categories`, `POST /api/categories`, `DELETE /api/categories/[id]`.
+- **`src/app/(main)/categories/page.js`** - Categories management ("use client").
+  - `CategoriesPage()` - Lists custom categories with All/Expense/Income tabs, add form (maxLength 50), inline confirm-once delete, and an **inline rename UI** (pencil → input, Enter/Esc shortcuts) calling `PUT /api/categories/[id]`. Fetch failure renders an explicit error banner with Retry — never a misleading empty state. "Matches default" badge retained.
 
-- **`src/app/(main)/profile/page.js`** - Profile settings page ("use client").
-  - `ProfilePage()` - Fetches user data from `GET /api/user` via `api()`. Profile form: Account Name (text), Email (disabled display), Preferred Currency (select: USD/INR). Save success/error shown via an **inline dismissible status banner** (no `alert()`). Security section with "Log Out From All Devices" danger-zone button calling `POST /api/auth/logout-all` via `api()` — uses a **two-step inline confirm** ("Are you sure?" → confirm/cancel) instead of `window.confirm`. Loading spinner, error handling.
+- **`src/app/(main)/profile/page.js`** - Profile settings ("use client").
+  - `ProfilePage()` - Reads `{ user, setUser }` from context; refreshes from server on mount (transient failures just stop loading — no forced logout). Save propagates via `setUser((prev) => ({...prev, …}))`. accountName maxLength 60. Security section: two-step inline confirm "Log Out From All Devices" → `POST /api/auth/logout-all` then hard `window.location.href = "/login"`.
+
+- Error boundaries `src/app/(main)/error.js` and `src/app/error.js` unchanged (recoverable cards with Try again).
 
 ---
 
@@ -90,194 +89,179 @@ A Next.js 15 personal finance tracking application with OTP-based authentication
 
 #### Auth API
 
-- **`src/app/api/auth/otp/send/route.js`** - Sends OTP via email using Brevo.
-  - `checkRateLimit(email)` - In-memory rate limiting (5 OTP/hour per email) with opportunistic stale-entry sweep.
-  - `findUserByEmail(email)` - Looks up users by lowercased email, with an exact-match fallback for legacy mixed-case signups. New accounts are always stored lowercased.
-  - `POST` - Accepts `{ email }`. Validates email format. Rate-limits (429 over limit). Generates 6-digit OTP with `crypto.randomInt` (CSPRNG — not `Math.random()`), stores (hashed via User model pre-save hook) with 10-min expiry. Creates new user if not exists. Sends via Brevo TransactionalEmailsApi. Returns success/error messages; hides internal errors from client.
+- **`src/app/api/auth/otp/send/route.js`** - Sends OTP via Brevo.
+  - `getClientIp(request)` - x-forwarded-for/x-real-ip extraction.
+  - `findUserByEmail(email)` - Lowercase lookup with exact-match legacy fallback.
+  - Rate limiting is **MongoDB-backed sliding-window** (via `src/lib/rate-limit.js`): per-email 5/hour AND per-IP 20/hour (stops OTP-bombing many addresses). Slots are **refunded** if the email send fails.
+  - `POST` - Validates email; checks both limits (429 uniform message); records hits; generates 6-digit CSPRNG OTP (`crypto.randomInt`), 10-min expiry, bcrypt-hashed via model hook. Preserves the previous pending OTP and restores it if the Brevo send throws. Handles the concurrent-signup unique-index race by refetching and retrying. Generic client errors only; `error.message` access guarded.
 
 - **`src/app/api/auth/otp/verify/route.js`** - Verifies OTP and establishes session.
-  - In-memory brute-force protection: per-email failure tracking with a **15-minute lockout after 5 failed attempts** (429 while locked); entries reset on success and are swept when the map grows.
-  - `getAttemptState()/isLockedOut()/recordFailure()/sweepStaleAttempts()` - Lockout state helpers.
-  - `findUserByEmail(email)` - Same lowercase-normalized lookup as the send route.
-  - `POST` - Accepts `{ email, otp }`. All failure cases (no pending OTP / expired / wrong code) return one **uniform message** so callers can't probe which emails exist. Compares via the User model's `compareOtp()` (bcrypt). On success: clears OTP fields + failure history, generates access token (15 min) and refresh token (30 days), stores refresh token in user document, purges expired refresh tokens via `purgeExpiredRefreshTokens()`, sets httpOnly cookies (accessToken + refreshToken), returns `{ isNewUser, user }`.
+  - Brute-force lockout via Mongo-backed sliding window: ≥5 failures per email inside 15 minutes → uniform 429. Success clears the key (`resetKey`).
+  - `DUMMY_HASH` - Real bcrypt hash compared against when no pending OTP exists, so response timing cannot reveal which emails have live codes.
+  - `POST` - Uniform failure message everywhere; bcrypt compare ALWAYS runs. On success: clears OTP fields + failure history, generates access (15m) + refresh (30d) tokens, stores the refresh token as a **SHA-256 hash** (`hashToken`), purges expired sessions, sets httpOnly cookies (sameSite strict), returns `{ isNewUser, user }`.
 
-- **`src/app/api/auth/refresh/route.js`** - Refreshes access token using refresh token.
-  - `POST` - Reads `refreshToken` cookie. Verifies JWT **first**: a bad/expired token clears both cookies and returns 401. Then checks against database for user+token match (401 + cookie clear if absent). Transient DB errors return 500 **without** clearing cookies, so the client can retry instead of being logged out. Generates new access token, sets accessToken cookie, and opportunistically prunes expired refresh tokens via `purgeExpiredRefreshTokens()` (best-effort).
+- **`src/app/api/auth/refresh/route.js`** - Refreshes access token. Implements **rotation + grace window + reuse detection**:
+  - JWT verified first (bad/expired → cookies cleared, 401).
+  - Session looked up by SHA-256 hash (legacy plaintext entries still matched until expiry).
+  - ACTIVE token → rotate: entry marked `rotatedAt = now`, new hashed token pushed, new refresh cookie set.
+  - ROTATED token **within 60s grace** → concurrent tab/duplicate request: mints only a fresh access token; nothing else touched.
+  - ROTATED token **past grace** → reuse treated as theft: ALL of the user's sessions revoked, cookies cleared, 401.
+  - `dbConnect()` runs INSIDE try — DB outage returns retryable 500 without clearing cookies. Opportunistic prune of expired + rotated-past-grace entries.
 
-- **`src/app/api/auth/logout/route.js`** - Logs out current session.
-  - `POST` - Reads `refreshToken` cookie. Decodes it, removes matching token from user's `refreshTokens` array. Clears both cookies. Returns success.
+- **`src/app/api/auth/logout/route.js`** - Removes this session's token from the DB by `$pull` matching `[hash, rawToken]` (raw kept for pre-hashing legacy sessions), then clears cookies regardless of DB outcome.
 
-- **`src/app/api/auth/logout-all/route.js`** - Logs out from all devices.
-  - `POST` - Reads `refreshToken` cookie. Decodes it, empties entire `refreshTokens` array for the user. Clears cookies. If the DB update fails, returns a **500 error** (never fake success) — cookies are still cleared locally.
+- **`src/app/api/auth/logout-all/route.js`** - Unchanged: empties `refreshTokens[]`; honest 500 on DB failure; cookies always cleared locally.
 
 #### User API
 
-- **`src/app/api/user/route.js`** - User CRUD operations.
-  - `GET` - Fetches authenticated user data. Uses `verifySession()`. Selects fields excluding `otp`, `refreshTokens`, `__v`. Returns generic error messages (no internals leaked).
-  - `PUT` - Updates user profile. Accepts `{ accountName, currency }`. Validates `accountName` (must be a string, trimmed, ≤60 chars). Uses `findByIdAndUpdate` with `$set`. Only updates provided fields.
+- **`src/app/api/user/route.js`**
+  - `GET` - Authenticated user data (`verifySession()`), excludes secrets.
+  - `PUT` - Accepts `{ accountName, currency }`; validates accountName (string, trimmed, ≤60) AND currency (must be USD/INR → otherwise 400, not a mongoose enum 500). `$set`-only update.
 
 #### Transactions API
 
-- **`src/app/api/transactions/route.js`** - Transaction list and creation.
-  - `GET` - Returns all transactions for authenticated user, sorted by `date` desc, `createdAt` desc. Auth via `verifySession()` (server-side revocation applies).
-  - `POST` - Creates new transaction. Auth via `verifySession()`. Validates: type (income/expense), amount (positive number), category (non-empty string), date (valid parseable). Stores the date exactly as the client sent it (client sends an ISO instant at 12:00 noon in the user's local timezone — the server never adjusts by its own offset). Accepts optional `excludeFromBudget` boolean — always persisted as `Boolean(excludeFromBudget)`. Sanitizes inputs (trim, parseFloat); mongoose validation messages are returned on 400 intentionally as input feedback.
+- **`src/app/api/transactions/route.js`**
+  - `escapeRegex(value)` - Escapes user input for `$regex`.
+  - `parseInstant(value)` - Safe date parsing.
+  - `GET` - **Server-side filtered + paginated**: `page` (default 1), `limit` (default 50, max 200), optional `type`, `category`, `search` (regex over description+category), `from`/`to` instants. Returns `{ transactions, total, page, pageSize, totalPages }` sorted date desc, createdAt desc.
+  - `POST` - Validation unchanged (type/amount/category/date); stores client-sent noon-local instant as-is; persists `excludeFromBudget` deterministically.
 
-- **`src/app/api/transactions/[id]/route.js`** - Single transaction CRUD.
-  - `GET` - Gets transaction by ID. Uses `verifySession()`. Ensures user owns the transaction.
-  - `PUT` - Updates transaction by ID. Stores date exactly as the client sent it (no timezone offset adjustment on the server — same rule as POST). Accepts optional `excludeFromBudget` — conditionally spread on `!== undefined` so a cleared `false` persists, coerced via `Boolean()`. Uses `findOneAndUpdate` with ownership check and `runValidators`.
-  - `DELETE` - Deletes transaction by ID. Uses `findOneAndDelete` with ownership check.
+- **`src/app/api/transactions/[id]/route.js`**
+  - GET/PUT/DELETE scoped to owner via `findOne…({ _id, userId })`. Malformed ObjectIds now return **404** (`mongoose.isValidObjectId` guard) instead of cast-error 500s. PUT stores sent date as-is; `excludeFromBudget` spread on `!== undefined` so clearing persists.
 
 #### Categories API
 
-- **`src/app/api/categories/route.js`** - Category management.
-  - `GET` - Returns merged list of default categories + user's custom categories, separated by type (expense/income). Also returns `allCustom` array with full category objects (with `_id`) for management. Uses `verifySession()`.
-  - `POST` - Creates new custom category. Accepts `{ name, type }`. Validates name and type required. Handles duplicate (11000 error → 409 Conflict). Generic error messages (no internals leaked).
+- **`src/app/api/categories/route.js`**
+  - `GET` - Defaults + custom merged per type, plus `allCustom` with `_id`s.
+  - `POST` - Requires name (trimmed, ≤50 chars) + type; duplicate → 409; `dbConnect` inside try.
 
-- **`src/app/api/categories/[id]/route.js`** - Single category operations.
-  - `PUT` - Renames a custom category. Validates ownership. Accepts `{ name }`. Returns 404 if not found or unauthorized.
-  - `DELETE` - Deletes a custom category. Validates ownership. Reassigns all transactions with that category name to **"Other"** (an existing default for both expense and income lists) via `Transaction.updateMany`, so nothing lands in a category missing from dropdowns. Returns 404 if not found or unauthorized.
+- **`src/app/api/categories/[id]/route.js`**
+  - `PUT` - **Rename with cascade**: renames the Category doc (duplicate → 409) then `Transaction.updateMany` + `Budget.updateMany` re-point old name → new name, so dropdowns/reports/budgets never reference ghost labels. ObjectId guard → 404.
+  - `DELETE` - Deletes category, reassigns its transactions to default "Other", and **deletes budgets for that name**. ObjectId guard → 404.
 
-- **`src/app/api/budgets/route.js`** - Monthly budget CRUD. All handlers use `verifySession()`.
-  - `GET` - Returns all budgets for the user for a given month (`?month=YYYY-MM`). Defaults to current month.
-  - `POST` - Creates or updates a budget (upsert). Accepts `{ category, amount, month }`. Validates amount ≥ 1.
-  - `DELETE` - Deletes a budget by `?category=X&month=YYYY-MM`.
+#### Budgets API
+
+- **`src/app/api/budgets/route.js`** - Month-scoped CRUD (`?month=YYYY-MM` validated by schema regex). POST upserts `{ userId, category, month }` (amount ≥1). All three handlers run `dbConnect` inside their try blocks.
 
 #### Reports API
 
-- **`src/app/api/reports/dashboard/route.js`** - Dashboard data aggregation.
-  - `GET` - Auth via `verifySession()`. Accepts `?start=<ISO instant>` — the client's local month start; falls back to server-local month start if absent/invalid. Returns aggregated data: `currentBalance` (all-time income - expenses), `monthlyIncome`, `monthlyExpenses`, `expenseBreakdown` (by category for current month), `recentTransactions` (last 5). Uses 4 concurrent Promise.all MongoDB aggregations.
+- **`src/app/api/reports/dashboard/route.js`** - Aggregations accept `start` AND `end` instants (client-local month bounds; falls back to server-computed month). Every monthly aggregation matches `$gte start, $lt end` — future-dated transactions can't inflate current month. Balance = all-time income − expenses; recent 5 transactions.
 
-- **`src/app/api/reports/budget-progress/route.js`** - Budget spending progress.
-  - `GET` - Auth via `verifySession()`. Accepts `?start=<ISO instant>` and `?month=YYYY-MM` (validated against `/^\d{4}-\d{2}$/`) from the client so the budget window matches the user's calendar month regardless of server timezone; falls back to server-local computation. Aggregates expense transactions and compares against per-category budgets and an overall budget (`__total__` category). Transactions flagged `excludeFromBudget` are excluded from both per-category and overall spending via `excludeFromBudget: { $ne: true }` in the `$match`; a second aggregation sums those excluded expenses for transparency. Returns `{ overall: { budget, spent, remaining, percentage, overBudget }, progress: [...], totalSpent, excludedSpent }`.
+- **`src/app/api/reports/budget-progress/route.js`** - Same start/end windowing. Spending aggregation excludes `excludeFromBudget`; separate aggregation sums excluded spend for transparency. Returns `{ overall, progress, totalSpent, excludedSpent }`.
 
-- **`src/app/api/reports/generate/route.js`** - Custom date-range report.
-  - `POST` - Auth via `verifySession()`. Accepts `{ startDate, endDate }` plus optional absolute `startInstant`/`endInstant` computed in the browser's timezone (preferred when valid; falls back to legacy server-local string parsing). Fetches transactions in range. Computes: `totalIncome`, `totalExpenses`, `netSavings`, `expenseDetails` (sorted desc by total), `incomeDetails` (sorted desc by total).
+- **`src/app/api/reports/generate/route.js`** - Prefers browser-timezone `startInstant`/`endInstant`; validates formats (400) and rejects reversed ranges (400). Summary + expense/income breakdowns sorted desc.
 
 ---
 
 ### MongoDB Models
 
-- **`src/models/user.model.js`** - User schema with Mongoose.
-  - Schema fields: `email` (required, unique, validated; new accounts stored lowercased), `accountName` (optional), `otp` (hashed, stored temporarily), `otpExpires` (Date), `role` (user/admin enum, default "user"), `currency` (USD/INR enum, default "USD"), `refreshTokens` (sub-document array with `token`, `deviceInfo`, `ipAddress`, `createdAt`).
-  - `RefreshTokenSchema` - Sub-document schema for session management. NOTE: MongoDB TTL indexes do NOT work on subdocument arrays — expired tokens are removed by `purgeExpiredRefreshTokens()` in `src/lib/auth.js`, called on login and token refresh.
-  - `pre("save")` hook - Auto-hashes OTP with bcrypt before saving when `otp` field is modified.
-  - `methods.compareOtp()` - Compares candidate OTP against stored bcrypt hash. Used by the verify route.
+- **`src/models/user.model.js`**
+  - Fields: email (unique, validated), accountName, otp (hashed, temp), otpExpires, role, currency (USD/INR), refreshTokens.
+  - `RefreshTokenSchema` - `token` stores the **SHA-256 hash** of the JWT (never raw); `deviceInfo`, `ipAddress`, `createdAt`; `rotatedAt` (set when rotation supersedes the token — valid during the grace window, purged after, reuse past it = theft). TTL indexes don't work on subdocument arrays — pruning happens in code.
+  - `pre("save")` hashes OTP when modified; `compareOtp()` method.
 
-- **`src/models/transaction.model.js`** - Transaction schema.
-  - Schema fields: `userId` (ObjectId ref to User, indexed), `type` (income/expense enum), `amount` (Number, min 0.01, must be positive), `date` (Date, required, default now), `category` (String, required, max 50 chars), `description` (String, optional, max 200 chars), `excludeFromBudget` (Boolean, default false — marks one-time/sudden expenses that don't count toward monthly budget progress).
-  - Indexes: Declared via `TransactionSchema.index()`: compound `{ userId, date: -1 }` and `{ userId, type: 1, date: -1 }`. Single index on `userId`. (The old `indexes: [...]` schema option was invalid and never created anything.)
-  - Virtual: `formattedAmount` (returns amount with 2 decimal places). `toJSON` includes virtuals.
-  - Timestamps enabled.
+- **`src/models/transaction.model.js`** - userId (indexed), type enum, amount (>0), date, category (≤50), description (≤200), excludeFromBudget bool. Compound indexes `{userId,date:-1}` + `{userId,type,date:-1}` via `.index()`. `formattedAmount` virtual.
 
-- **`src/models/category.model.js`** - Category schema.
-  - Schema fields: `userId` (ObjectId ref to User), `name` (String, required, trimmed), `type` (income/expense enum).
-  - Unique compound index: `{ userId, name, type }` to prevent duplicate categories per user per type.
+- **`src/models/category.model.js`** - userId, name (required, trimmed, **maxlength 50** — matches Transaction.category cap so every custom category is assignable), type enum. Unique `{userId,name,type}`.
 
-- **`src/models/budget.model.js`** - Monthly budget schema.
-  - Schema fields: `userId` (ObjectId ref to User, indexed), `category` (String, required), `amount` (Number, min 1), `month` (String, YYYY-MM format).
-  - Unique compound index: `{ userId, category, month }` to prevent duplicate budgets per user per category per month.
+- **`src/models/budget.model.js`** - userId, category, amount (≥1), month (`YYYY-MM` regex). Unique `{userId,category,month}`.
+
+- **`src/models/ratelimit.model.js`** *(new)* - Backing store for auth rate limiting: `{ key (unique), hits [Date] ($slice-capped at 100), expiresAt }` with a **top-level TTL index** (`expireAfterSeconds: 0`) so MongoDB auto-purges expired docs (~60s sweeper). Shared across instances; survives restarts.
 
 ---
 
 ### Utility Libraries (`/src/lib/`)
 
-- **`src/lib/mongodb.js`** - MongoDB connection manager.
-  - `dbConnect()` - Singleton connection pattern. Caches connection in `global.mongoose`. Options: `bufferCommands: false`, `maxPoolSize: 10`, `serverSelectionTimeoutMS: 5000`, `socketTimeoutMS: 45000`, `family: 4`. Resets promise on connection error.
+- **`src/lib/mongodb.js`** - Singleton Mongoose connection (`bufferCommands:false`, pool 10, timeouts). Resets cached promise on failure.
 
 - **`src/lib/auth.js`** - Authentication utilities.
-  - Constants: `ACCESS_TOKEN_SECRET`, `REFRESH_TOKEN_SECRET` (throw at import if missing), `REFRESH_TOKEN_TTL_MS` (30 days, exported).
-  - `generateAccessToken(userId)` - Signs JWT with 15-min expiry using `ACCESS_TOKEN_SECRET` and `jsonwebtoken`.
-  - `generateRefreshToken(userId)` - Signs JWT with 30-day expiry, includes `jti` (`crypto.randomUUID()`), uses `REFRESH_TOKEN_SECRET`.
-  - `verifyToken(token, secret)` - Verifies JWT, returns decoded payload or null on error.
-  - `verifyAuth()` - Lightweight auth check for Edge/server-component runtime. Reads `accessToken` cookie, verifies with `jose` (jwtVerify), returns `{ user: { _id } }` or `{ user: null }`. Used by the root page redirect and middleware-adjacent checks only — **all data API routes now use `verifySession()`** so server-side revocation applies everywhere.
-  - `verifySession()` - Secure auth check for Node.js API routes. Reads both cookies, verifies access token with `jsonwebtoken`, connects to DB, checks refresh token exists in user document. Returns `{ user }` or `{ user: null, error }`.
-  - `purgeExpiredRefreshTokens(userId)` - `$pull`s refresh tokens with `createdAt` older than the TTL from the user document (TTL indexes don't work on subdocument arrays). Called on login and refresh.
+  - Constants: `ACCESS_TOKEN_SECRET`, `REFRESH_TOKEN_SECRET` (throw at import if missing), `REFRESH_TOKEN_TTL_MS` (30d), `REFRESH_ROTATION_GRACE_MS` (60s).
+  - `hashToken(token)` - SHA-256 hex digest used to store/lookup refresh tokens.
+  - `generateAccessToken(userId)` / `generateRefreshToken(userId)` (includes `jti`).
+  - `verifyToken(token, secret)` - jsonwebtoken verify wrapper returning null on error.
+  - `verifyAuth()` - Edge/server-component check via jose (root-page redirect only).
+  - `verifySession()` - Full check for API routes: verifies access JWT, connects DB, confirms refresh token exists (by hash, legacy plaintext fallback). Returns `{user}` or `{user:null, error, status}` where status distinguishes definitive auth failures (401) from infrastructure trouble (503) — callers never turn a DB outage into a forced logout.
+  - `purgeExpiredRefreshTokens(userId)` - Pulls entries older than TTL OR rotated-past-grace.
 
-- **`src/lib/server-utils.js`** - Server response helpers.
-  - `sendSuccess(data, status = 200)` - Returns `NextResponse.json()` with data and status.
-  - `sendError(message, status = 500)` - Returns `NextResponse.json({ error: message })` with status.
+- **`src/lib/rate-limit.js`** *(new)* - MongoDB-backed sliding-window limiter. `recordHit(key, windowMs)` (pushes timestamp, $slice-capped), `countRecentHits(key, windowMs)` (aggregate $filter count), `popLastHit(key)` (refund quota), `resetKey(key)` (clear on success). Every helper **fails open** on DB errors so the limiter can never lock everyone out during an incident.
 
-- **`src/lib/utils.js`** - Client-side utility functions.
-  - `formatCurrency(amount, currency = 'USD')` - Formats number as currency string. Uses `en-IN` locale for INR, `en-US` for others. Returns formatted string or "0.00" equivalent.
-  - `formatDate(dateString)` - Formats date to "Month Day, Year" (e.g., "January 15, 2024"). Returns empty string for null/invalid dates.
-  - `formatDateForInput(date)` - Formats Date object to "YYYY-MM-DD" for HTML date input. Returns empty string for null/invalid.
+- **`src/lib/server-utils.js`** - `sendSuccess(data, status)` / `sendError(message, status)` JSON helpers.
 
-- **`src/lib/api.js`** - API client with automatic token refresh. Used by every authenticated client call (dashboard, transactions, categories, reports, profile, budgets, drawer components); the login page intentionally uses raw `fetch` to avoid a redirect loop.
-  - `api(url, options)` - Wrapper around `fetch()`. On 401 response (excluding `/api/auth/refresh`), triggers token refresh via `/api/auth/refresh`. Uses a queue pattern to prevent concurrent refresh storms - multiple requests queue up behind one refresh. If refresh fails, redirects to `/login` via `window.location.href`. Variables: `isRefreshing` (boolean), `failedQueue` (array of promises).
-  - `processQueue(error, token)` - Resolves or rejects all queued requests.
+- **`src/lib/utils.js`** - `formatCurrency` (en-IN for INR), `formatDate`, `formatDateForInput` (local getters). Covered by unit tests.
 
-- **`src/lib/constants.js`** - Application constants.
-  - `defaultExpenseCategories` - Default categories: Food, Groceries, Transport, Bills, Housing, Entertainment, Health, Shopping, Other.
-  - `defaultIncomeCategories` - Default categories: Salary, Bonus, Freelance, Investment, Other.
+- **`src/lib/api.js`** - Fetch wrapper with automatic token refresh. Contract:
+  - Each request retries **at most once** after a refresh (`options._authRetried` guard) — a second 401 is handed back, never looped/deadlocked (regression-tested).
+  - Concurrent 401s queue behind ONE in-flight refresh (`isRefreshing` + `failedQueue`).
+  - Refreshes are serialized ACROSS tabs via Web Locks (`navigator.locks.request("fintrack-auth-refresh")`) where supported.
+  - Only a definitive refresh rejection (HTTP 401) redirects to `/login`. Network errors and 5xx are transient: they reject the request with an error for the caller's inline UI — no forced logout during backend blips.
+
+- **`src/lib/constants.js`** - Default expense/income category lists.
 
 ---
 
 ### Components (`/src/components/`)
 
-- **`src/components/AddTransactionDrawer.js`** - Slide-in drawer for adding transactions ("use client").
-  - `SegmentedControl()` - Custom toggle between Expense/Income with animated active pill using Framer Motion `layoutId`.
-  - `AddTransactionDrawer({ isOpen, onClose, onTransactionAdded })` - Form with type toggle, amount input, category select (with "Add New" option), date picker, description field, payment method selector (Cash/Card), and a "One-time expense" checkbox (shown only for expenses) that sets `excludeFromBudget`. The `<form>` has `id="add-transaction-form"` and the footer submit button is associated via the `form` attribute — native HTML5 validation runs for both button click and Enter key. All API calls go through the `api()` wrapper with `res.ok` checks. Fetches categories on open — shows merged list of built-in defaults + custom categories in the dropdown. "Add New" option creates a new custom category via `POST /api/categories` and refreshes the list. Submits transaction via `POST /api/transactions`, sending the date as `new Date(date + "T12:00:00")` — an ISO instant at 12:00 noon in the user's local timezone (noon avoids DST edge cases). Default date is `formatDateForInput(new Date())` (user's local date). Resets form state (including `excludeFromBudget`) on close. Animated slide-in from right with backdrop overlay.
+- **`src/components/AddTransactionDrawer.js`** - Slide-in drawer ("use client").
+  - `SegmentedControl()` - Animated Expense/Income pill.
+  - `AddTransactionDrawer({...})` - Type switch resets selection via `handleTypeChange` (event-driven, no effect). Amount min 0.01 step 0.01; description maxLength 200; new-category maxLength 50. Category creation surfaces the server's message (e.g. 409 duplicate), then switches back to the dropdown with the new value preselected (prevents double-create retries). Submits date as noon-local instant through `api()`. `handleClose` is a stable callback; **Escape closes and body scroll locks** while open. Form reset on close.
 
-- **`src/components/SimpleChart.js`** - Lazy-loaded pie chart component ("use client").
-  - `SimpleChart({ data, options })` - Dynamically imports Chart.js and react-chartjs-2. Registers `ArcElement`, `Tooltip`, `Legend`. Renders `<Pie>` component. States: loading (spinner), error (red message with dev-only details), no data, component not available, and chart rendering. Height: 300px, min-height: 300px.
+- **`src/components/SimpleChart.js`** - Lazy-loaded Chart.js Pie with loading/error/empty states. Unchanged.
 
-- **`src/components/BudgetProgress.js`** - Budget progress bars for the dashboard ("use client").
-  - `BudgetProgress()` - Fetches from `/api/reports/budget-progress?start=<local month start>&month=<YYYY-MM>` via the `api()` wrapper (client-local month window so it matches the user's calendar month; `res.ok` checked). Renders animated progress bars per category showing spent vs budget. Color-coded: indigo (under 80%), amber (80-100%), red (over budget). The "Total spent this month" line appends "(excl. X in one-time expenses)" when the API reports `excludedSpent > 0`. Uses `UserContext` for currency formatting. Returns null if no budgets set.
+- **`src/components/BudgetProgress.js`** - Dashboard budget bars. Sends `start`+`end`+`month` (client-local window). Color-coded progress (indigo/amber/red), overall + per-category sections, "(excl. X in one-time expenses)" note. Consumes `{ user }` from context.
 
-- **`src/components/BudgetManager.js`** - Slide-in drawer for setting monthly budgets ("use client").
-  - `BudgetManager({ isOpen, onClose, onSaved })` - Fetches expense categories from `/api/categories` and existing budgets from `/api/budgets?month=<local YYYY-MM>` via `api()`. Lets user set an overall monthly budget and per-category spending limits. Warns when combined category budgets exceed the overall budget. Saves all via `POST /api/budgets`; delete uses `encodeURIComponent(category)` in the query string. Animated slide-in with backdrop overlay.
+- **`src/components/BudgetManager.js`** - Budget-setting drawer, rewritten:
+  - Keeps `originalBudgets` snapshot from load; **Save deletes budgets whose fields were cleared** (clearing ≠ silently keeping the old limit).
+  - Errors are VISIBLE (inline banner) for failed saves and removals; inputs live in a `<form>` so native validation runs; footer is sticky.
+  - Over-budget warning text uses the user's currency via `formatCurrency` (no hardcoded `$`).
 
 ---
 
 ## Authentication Flow
 
-1. **Login**: User enters email → OTP generated with `crypto.randomInt` (CSPRNG), sent via Brevo. Send endpoint rate-limited to 5 OTP/hour per email.
-2. **OTP Verify**: User enters OTP → brute-force lockout check (5 failures / 15 min per email) → validated against bcrypt hash with a uniform failure message (no account enumeration) → tokens generated.
-3. **Session**: Access token (15min JWT) + Refresh token (30d JWT, stored in DB) set as httpOnly cookies. Expired refresh tokens are purged from the DB on login and refresh (`purgeExpiredRefreshTokens`).
-4. **Verification**: All data API routes use `verifySession()` (full DB check) so server-side revocation applies everywhere; `verifyAuth()` (jose-only) remains for the root-page redirect.
-5. **Token Refresh**: Automatic via `api.js` client wrapper on 401 responses. Refresh verifies the JWT first (bad token → cookies cleared); transient DB errors return 500 without clearing cookies.
-6. **Logout**: Single session → removes specific refresh token from DB. All sessions → empties refresh tokens array; DB failures return an honest 500.
-7. **Middleware**: Guards all routes except public auth paths and static assets. Redirects logged-in users away from login/welcome.
+1. **Login**: email → OTP generated with `crypto.randomInt` (CSPRNG), sent via Brevo. Limits (Mongo-backed, shared across instances): 5/hour/email + 20/hour/IP; slots refunded on send failure; previous pending OTP restored if the email fails.
+2. **OTP Verify**: Mongo-backed lockout (5 failures / sliding 15min → uniform 429); bcrypt compare always runs (dummy-hash timing equalization); uniform failure messages (no enumeration).
+3. **Session**: access (15m) + refresh (30d) httpOnly sameSite=strict cookies. Refresh tokens stored in the user document as **SHA-256 hashes**; expired entries pruned opportunistically on login/refresh.
+4. **Verification**: all data routes use `verifySession()` (DB-backed revocation) with 401-vs-503 classification.
+5. **Token Refresh**: automatic via `api()` (single-flight per tab, Web-Lock serialized across tabs). Rotation marks the old entry `rotatedAt` and stores a fresh hash; duplicates within the 60s grace window get an access token only; presenting a rotated token AFTER grace revokes every session (reuse detection).
+6. **Logout**: single-session `$pull` by hash (legacy raw accepted); logout-all empties the array honestly.
+7. **Proxy**: guards routes (anon → `/login`; authed away from `/login` only) and injects the per-request CSP nonce.
 
 ## Security Headers
 
-Set globally in `next.config.mjs`: `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`, `Permissions-Policy`, `Strict-Transport-Security`. A strict CSP is intentionally deferred (Chart.js/Framer Motion inline-style tuning).
+Baseline headers in `next.config.mjs` (XFO/nosniff/referrer/permissions/HSTS). **Strict CSP is now enforced** per-request by `src/proxy.js`: `default-src 'self'`, `script-src 'self' 'nonce-{per-request}' 'strict-dynamic'` (dev adds `'unsafe-eval'`), `style-src 'self' 'unsafe-inline'` (Framer Motion/Chart.js styling), tight img/font/connect/object/base/form/frame directives. Root layout exports `dynamic = "force-dynamic"` because nonce stamping requires dynamic rendering (verified on Turbopack and webpack production builds).
 
 ## Currency Support
-- USD and INR supported
-- Currency preference stored per user, configurable in profile
-- Dashboard, transactions, and reports respect user's currency setting via `UserContext`
-- INR formatting uses `en-IN` locale (lakhs/crores style)
+USD and INR, stored per user; formatting via `UserContext` everywhere (context updates propagate instantly after profile saves). INR uses `en-IN` lakh grouping.
 
 ## Data Visualization
-- Dashboard: Pie chart for monthly expense breakdown (via `SimpleChart` with dynamic Chart.js import)
-- Reports: Bar chart for expense breakdown (direct `react-chartjs-2 Bar` import)
-- Both chart components handle loading, error, empty data, and SSR gracefully
+Dashboard pie (lazy-loaded `SimpleChart`) and reports bar chart; slice colors generated for any category count; loading/error/empty states throughout.
 
 ## Key Design Decisions
-- **No Password Authentication**: Fully OTP-based using email (Brevo/Sendinblue)
-- **Dual Token System**: Short-lived access token + long-lived refresh token
-- **Database-Backed Sessions**: Refresh tokens stored in user document for server-side revocation; all data routes enforce it via `verifySession()`
-- **Rate Limiting**: In-memory OTP send limits (5/hour per email) and verify lockout (5 failures / 15 min) - swap to Redis in production / multi-instance deployments
-- **Timezone Handling — client-driven windows**: Transaction dates are sent as an ISO instant at 12:00 noon in the user's local timezone (`new Date(date + "T12:00:00")`) and stored as-is by the server. Month-based endpoints (dashboard, budget-progress, report generation) likewise receive the client's local month start / absolute instants, so no server-side timezone math ever disagrees with what the user sees.
-- **Error Hygiene**: Internal error messages are never returned to clients (generic messages + server-side logging); mongoose validation messages on transaction create are the one intentional exception (user input feedback).
-- **Lazy-Loaded Charts**: Chart.js dynamically imported to avoid SSR issues
+- **No Password Authentication**: OTP-only via email (Brevo).
+- **Dual Token System + rotation**: short-lived access + rotating refresh with grace window and reuse detection; tokens hashed at rest.
+- **Database-Backed Sessions**: revocable everywhere via `verifySession()`.
+- **MongoDB-backed rate limiting**: shared across instances/restarts, fails open.
+- **Strict CSP**: nonce-per-request through the proxy; dynamic rendering required.
+- **Timezone Handling**: noon-local instants stored as-is; clients send absolute month windows (`start`/`end`); server never applies its own offset. End-bounds keep future-dated transactions out of "current month".
+- **Error Hygiene**: generic client messages; validation feedback (400s) where input-specific; 503 for transient infra so clients don't log users out.
+- **Server-side pagination**: transactions endpoint pages/filters server-side (max 200/page); client debounces search.
+- **Tests**: Vitest unit suite covering utils, token hashing/generation roundtrip, and the api() refresh contract (incl. deadlock regression).
 
 ---
 
 ## Environment Variables
 
-Define all of these in a `.env.local` file at the project root.
+Define all of these in a `.env.local` file at the project root. (No new variables were introduced in the latest cycle.)
 
 | Variable | Purpose | Referenced In |
 |----------|---------|---------------|
-| `MONGODB_URI` | MongoDB connection string (database: `fintrack_db`) | `src/lib/mongodb.js` |
+| `MONGODB_URI` | MongoDB connection string (database: `fintrack_db`) — also backs the rate-limit collection | `src/lib/mongodb.js` |
 | `BREVO_API_KEY` | Brevo (Sendinblue) API key for sending OTP emails | `src/app/api/auth/otp/send/route.js` |
 | `EMAIL_FROM` | Verified sender email for Brevo | `src/app/api/auth/otp/send/route.js` |
 | `ACCESS_TOKEN_SECRET` | JWT secret for access tokens (15min expiry) | `src/lib/auth.js` |
-| `REFRESH_TOKEN_SECRET` | JWT secret for refresh tokens (30d expiry) | `src/lib/auth.js` |
+| `REFRESH_TOKEN_SECRET` | JWT secret for refresh tokens (30d expiry, rotated on use) | `src/lib/auth.js`, refresh route |
 | `JWT_SECRET` | Additional JWT secret (reserved) | — |
-| `NODE_ENV` | Environment mode (`development` / `production`) | Various (cookie security, dev messages) |
+| `NODE_ENV` | Environment mode (`development` adds `'unsafe-eval'` to CSP script-src; controls cookie security) | proxy, auth routes |
 
 ### Generating JWT Secrets
 ```bash
@@ -293,3 +277,9 @@ Run 3 times — one for each of `ACCESS_TOKEN_SECRET`, `REFRESH_TOKEN_SECRET`, a
 ### Setup MongoDB
 1. Create a MongoDB Atlas account or use local MongoDB
 2. Create database `fintrack_db`, get connection string, set as `MONGODB_URI`
+
+### Tests
+```bash
+npm test        # vitest run (22 unit tests)
+npm run lint    # eslint . (clean)
+```
