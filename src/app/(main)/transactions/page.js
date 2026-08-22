@@ -380,9 +380,10 @@ export default function TransactionsPage() {
       })
       .then((data) => {
         if (cancelled) return;
+        // Dedupe across types — "Other" is a default in BOTH expense and
+        // income lists, and duplicate names would collide as React keys.
         const names = [
-          ...(data.expense || []),
-          ...(data.income || []),
+          ...new Set([...(data.expense || []), ...(data.income || [])]),
         ].sort((a, b) => a.localeCompare(b));
         setCategoryOptions(names);
       })
