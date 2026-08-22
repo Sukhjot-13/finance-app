@@ -20,7 +20,9 @@ A Next.js 15 personal finance tracking application with OTP-based authentication
 | `/jsconfig.json` | JavaScript/Next.js path aliases (@/ maps to ./src) |
 | `/tailwind.config.js` | Tailwind CSS theme configuration (if exists) |
 | `/README.md` | Project documentation |
-| `/architecture.md` | Project architecture documentation |
+| `/docs/architecture.md` | Project architecture documentation |
+| `/docs/audit.md` | Full-site audit (2026-08-21): vulnerabilities, bugs, fix order |
+| `/docs/suggestions.md` | Suggestions / improvement / vulnerability log |
 
 ### Source Code (`/src/`)
 
