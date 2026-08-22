@@ -16,8 +16,17 @@ export async function GET(req) {
 
   try {
     const userId = new mongoose.Types.ObjectId(user._id);
-    const today = new Date();
-    const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+
+    // Prefer the client's local month start (an absolute instant) so the
+    // window matches what the user sees regardless of server timezone.
+    const { searchParams } = new URL(req.url);
+    const startParam = searchParams.get("start")
+      ? new Date(searchParams.get("start"))
+      : null;
+    const startOfMonth =
+      startParam && !isNaN(startParam.getTime())
+        ? startParam
+        : new Date(new Date().getFullYear(), new Date().getMonth(), 1);
 
     // Aggregations
     const balancePromise = Transaction.aggregate([

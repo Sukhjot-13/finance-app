@@ -52,7 +52,13 @@ export default function DashboardPage() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/reports/dashboard");
+      // Send the client's local month start so the server window matches the
+      // user's calendar regardless of where the server runs.
+      const now = new Date();
+      const start = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+      const res = await fetch(
+        `/api/reports/dashboard?start=${encodeURIComponent(start)}`
+      );
       if (!res.ok) throw new Error("Failed to fetch dashboard data");
       const result = await res.json();
       setData(result);

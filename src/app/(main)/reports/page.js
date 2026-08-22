@@ -41,10 +41,17 @@ export default function ReportsPage() {
     setError("");
     setReport(null);
     try {
+      // Send absolute instants parsed in the BROWSER (user's timezone) plus
+      // the raw strings for backward compatibility.
       const res = await fetch("/api/reports/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ startDate, endDate }),
+        body: JSON.stringify({
+          startDate,
+          endDate,
+          startInstant: new Date(startDate + "T00:00:00").toISOString(),
+          endInstant: new Date(endDate + "T23:59:59.999").toISOString(),
+        }),
       });
       if (!res.ok) throw new Error("Failed to generate report.");
       const data = await res.json();

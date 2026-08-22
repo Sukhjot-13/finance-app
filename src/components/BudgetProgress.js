@@ -11,7 +11,14 @@ export default function BudgetProgress() {
   const user = useContext(UserContext);
 
   useEffect(() => {
-    fetch("/api/reports/budget-progress")
+    // Client-local month window + month key so the server compares against
+    // the budget month the user actually means.
+    const now = new Date();
+    const start = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+    const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+    fetch(
+      `/api/reports/budget-progress?start=${encodeURIComponent(start)}&month=${month}`
+    )
       .then((res) => res.json())
       .then((data) => setData(data))
       .catch(console.error)

@@ -17,9 +17,22 @@ export async function GET(req) {
 
   try {
     const userId = new mongoose.Types.ObjectId(user._id);
+
+    // Prefer the client's local month start + month key so budget windows
+    // match what the user sees regardless of server timezone.
+    const { searchParams } = new URL(req.url);
+    const startParam = searchParams.get("start")
+      ? new Date(searchParams.get("start"))
+      : null;
+    const monthParam = searchParams.get("month");
     const today = new Date();
-    const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
-    const monthKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
+    const startOfMonth =
+      startParam && !isNaN(startParam.getTime())
+        ? startParam
+        : new Date(today.getFullYear(), today.getMonth(), 1);
+    const monthKey = /^\d{4}-\d{2}$/.test(monthParam || "")
+      ? monthParam
+      : `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
 
     // Get all budgets for this month
     const budgets = await Budget.find({ userId: user._id, month: monthKey }).lean();
