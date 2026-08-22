@@ -2,37 +2,117 @@
 import User from "@/models/user.model";
 import { sendError, sendSuccess } from "@/lib/server-utils";
 import { generateAccessToken, generateRefreshToken } from "@/lib/auth";
-import bcrypt from "bcryptjs";
 import { cookies } from "next/headers";
 import dbConnect from "@/lib/mongodb";
 
+// In-memory brute-force protection (in production, use Redis).
+// 5 failed attempts per email within 15 minutes locks that email out for
+// 15 minutes. Entries reset on success and are swept when the map grows.
+const LOCKOUT_MS = 15 * 60 * 1000;
+const MAX_ATTEMPTS = 5;
+const verifyAttempts = new Map();
+
+function getAttemptState(email) {
+  const now = Date.now();
+  let entry = verifyAttempts.get(email);
+  if (!entry) {
+    entry = { attempts: [], lockedUntil: 0 };
+    verifyAttempts.set(email, entry);
+  }
+  if (entry.lockedUntil <= now && entry.attempts.length > 0) {
+    entry.attempts = entry.attempts.filter((t) => now - t < LOCKOUT_MS);
+  }
+  return { entry, now };
+}
+
+function isLockedOut(entry, now) {
+  if (entry.lockedUntil > now) return true;
+  // Auto-lock once the failure threshold inside the window is reached
+  return entry.attempts.length >= MAX_ATTEMPTS;
+}
+
+function recordFailure(entry) {
+  entry.attempts.push(Date.now());
+  if (entry.attempts.length >= MAX_ATTEMPTS) {
+    entry.lockedUntil = Date.now() + LOCKOUT_MS;
+  }
+}
+
+function sweepStaleAttempts() {
+  if (verifyAttempts.size <= 1000) return;
+  const now = Date.now();
+  for (const [key, entry] of verifyAttempts) {
+    const stale =
+      entry.lockedUntil <= now &&
+      entry.attempts.every((t) => now - t >= LOCKOUT_MS);
+    if (stale) verifyAttempts.delete(key);
+  }
+}
+
+/**
+ * Finds a user by email. New accounts are always stored lowercased; the
+ * exact-match fallback keeps legacy mixed-case signups reachable.
+ */
+async function findUserByEmail(email) {
+  const normalized = email.trim().toLowerCase();
+  let user = await User.findOne({ email: normalized });
+  if (!user && email !== normalized) {
+    user = await User.findOne({ email });
+  }
+  return user;
+}
+
 export async function POST(req) {
-  await dbConnect();
   const { email, otp } = await req.json();
 
   if (!email || !otp) {
     return sendError("Email and OTP are required.", 400);
   }
 
+  sweepStaleAttempts();
+  const key = String(email).trim().toLowerCase();
+  const { entry, now } = getAttemptState(key);
+
+  // Reject cheaply while locked — identical message as any other failure so
+  // attackers learn nothing extra.
+  if (isLockedOut(entry, now)) {
+    return sendError(
+      "Too many failed attempts. Please try again later.",
+      429
+    );
+  }
+
   try {
-    const user = await User.findOne({ email });
+    await dbConnect();
+
+    const user = await findUserByEmail(email);
+
+    // One uniform failure message for "no pending OTP", "expired", and
+    // "wrong code" — differences would let callers probe which emails exist.
+    let failureMessage = null;
 
     if (!user || !user.otp || !user.otpExpires) {
-      return sendError("Invalid request. Please try again.", 400);
+      failureMessage = "Invalid or expired code. Please request a new one.";
+    } else if (new Date() > user.otpExpires) {
+      failureMessage = "Invalid or expired code. Please request a new one.";
     }
 
-    if (new Date() > user.otpExpires) {
-      return sendError("OTP has expired. Please request a new one.", 400);
+    if (!failureMessage) {
+      const isMatch = await user.compareOtp(String(otp));
+      if (!isMatch) {
+        failureMessage = "Invalid or expired code. Please request a new one.";
+      }
     }
 
-    const isMatch = await bcrypt.compare(otp, user.otp);
-    if (!isMatch) {
-      return sendError("Invalid OTP.", 400);
+    if (failureMessage) {
+      recordFailure(entry);
+      return sendError(failureMessage, 400);
     }
 
-    // OTP is valid, clear it from the database
+    // Success — clear OTP fields and this email's failure history
     user.otp = undefined;
     user.otpExpires = undefined;
+    verifyAttempts.delete(key);
 
     // Generate tokens
     const accessToken = generateAccessToken(user._id);

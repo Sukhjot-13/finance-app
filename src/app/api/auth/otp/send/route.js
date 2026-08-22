@@ -1,7 +1,7 @@
 // FILE: src/app/api/auth/otp/send/route.js
-// ** THIS IS THE UPDATED FILE - ALIGNED WITH OFFICIAL DOCS **
 // Handles sending the One-Time Password via Brevo.
 
+import { randomInt } from "crypto";
 import dbConnect from "@/lib/mongodb";
 import User from "@/models/user.model";
 import { NextResponse } from "next/server";
@@ -13,17 +13,39 @@ const otpAttempts = new Map();
 function checkRateLimit(email) {
   const now = Date.now();
   const attempts = otpAttempts.get(email) || [];
-  
+
   // Remove attempts older than 1 hour
   const recentAttempts = attempts.filter(timestamp => now - timestamp < 60 * 60 * 1000);
-  
+
   if (recentAttempts.length >= 5) {
     return false; // Rate limited
   }
-  
+
   recentAttempts.push(now);
   otpAttempts.set(email, recentAttempts);
+
+  // Opportunistic sweep so abandoned emails don't grow the map forever
+  if (otpAttempts.size > 1000) {
+    for (const [key, stamps] of otpAttempts) {
+      if (stamps.every(timestamp => now - timestamp >= 60 * 60 * 1000)) {
+        otpAttempts.delete(key);
+      }
+    }
+  }
   return true;
+}
+
+/**
+ * Finds a user by email. New accounts are always stored lowercased; the
+ * exact-match fallback keeps legacy mixed-case signups reachable.
+ */
+async function findUserByEmail(email) {
+  const normalized = email.trim().toLowerCase();
+  let user = await User.findOne({ email: normalized });
+  if (!user && email !== normalized) {
+    user = await User.findOne({ email });
+  }
+  return user;
 }
 
 export async function POST(request) {
@@ -48,19 +70,20 @@ export async function POST(request) {
     }
 
     // Check rate limiting
-    if (!checkRateLimit(email)) {
+    if (!checkRateLimit(email.toLowerCase())) {
       return NextResponse.json(
         { message: "Too many OTP requests. Please wait before trying again." },
         { status: 429 }
       );
     }
 
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    // Cryptographically secure 6-digit OTP (Math.random() is predictable)
+    const otp = randomInt(100000, 1000000).toString();
     const otpExpires = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
 
-    let user = await User.findOne({ email });
+    let user = await findUserByEmail(email);
     if (!user) {
-      user = new User({ email });
+      user = new User({ email: email.trim().toLowerCase() });
     }
 
     user.otp = otp;
