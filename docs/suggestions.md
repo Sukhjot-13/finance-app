@@ -6,8 +6,15 @@
 
 ## 🟢 Improvements
 
+### Deploy the audit fixes (a1–a8) — email normalization is critical (2026-08-22)
+The lowercase-email normalization (`findUserByEmail` in both OTP routes) that prevents duplicate accounts from case-variant logins exists in local commits a1–a8 but is **not pushed/deployed** — prod still auto-creates a fresh account whenever the email is typed differently. Push and deploy to activate.
+
+### Enable MongoDB Atlas backups (2026-08-22)
+Incident postmortem: 9 user documents were deleted from `test.users` externally (the app has no delete-user code), orphaning 97 transactions. They were relinked to `sukhjotsingh441@gmail.com` on 2026-08-22 (backup: `.backup-orphan-txs-*.json`, gitignored). Atlas M0 has no automatic snapshots — upgrade to M10 for continuous backup, or schedule periodic `mongodump`s, so future accidental deletions are recoverable. Also consider limiting who has direct write access to the cluster via Atlas UI.
+
 ### Invalid `indexes` option in Transaction schema (2026-08-05)
 `src/models/transaction.model.js` passes `indexes: [...]` inside the schema options object — that is not a valid Mongoose option, so the two compound indexes (`{userId, date}`, `{userId, type, date}`) are **never created**. Should be converted to `TransactionSchema.index(...)` calls (the pattern used in `budget.model.js` and `category.model.js`). Single-field `index: true` on `userId` works fine. Worth fixing for query performance as data grows.
+✅ **Done** (2026-08-22, commit a8) — converted to `.index()` calls.
 
 ### Toast notifications instead of `alert()`
 Several places use `alert()` and `window.confirm()` (profile save, transaction delete, edit errors). A small toast component would feel much more polished.
