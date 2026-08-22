@@ -1,5 +1,4 @@
 // src/lib/api.js
-import { useRouter } from "next/navigation";
 
 let isRefreshing = false;
 let failedQueue = [];

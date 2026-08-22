@@ -49,15 +49,16 @@ const TransactionSchema = new mongoose.Schema(
       default: false,
     },
   },
-  { 
+  {
     timestamps: true,
-    // Add compound index for common queries
-    indexes: [
-      { userId: 1, date: -1 },
-      { userId: 1, type: 1, date: -1 }
-    ]
   }
 );
+
+// Compound indexes for common query patterns. NOTE: these MUST be declared
+// via .index() — an `indexes: [...]` schema option is not a valid Mongoose
+// option and would silently never create anything.
+TransactionSchema.index({ userId: 1, date: -1 });
+TransactionSchema.index({ userId: 1, type: 1, date: -1 });
 
 // Add a virtual for formatted amount
 TransactionSchema.virtual('formattedAmount').get(function() {
