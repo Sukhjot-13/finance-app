@@ -21,8 +21,8 @@ A Next.js 16 personal finance tracking application with OTP-based authentication
 | `/jsconfig.json` | JavaScript/Next.js path aliases (@/ maps to ./src) |
 | `/README.md` | Project documentation |
 | `/docs/architecture.md` | Project architecture documentation |
-| `/docs/audit.md` | Audit status (2026-08-22 second cycle — all findings fixed & tested; history table kept) |
-| `/docs/suggestions.md` | Suggestions / improvement / vulnerability log (done items archived under ✅ for traceability) |
+| `/docs/audit.md` | Audit status (both 2026-08-22 cycles closed — no open items; standing verification + intentional-behavior notes only) |
+| `/docs/suggestions.md` | Suggestions / improvement / vulnerability log (open items only — completed ones removed, history in git) |
 
 ### Test Suite (`/test/`)
 
