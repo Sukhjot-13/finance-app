@@ -18,20 +18,24 @@ export async function GET(req) {
   try {
     const userId = new mongoose.Types.ObjectId(user._id);
 
-    // Prefer the client's local month start + month key so budget windows
-    // match what the user sees regardless of server timezone.
+    // Prefer the client's local month start/end + month key so budget windows
+    // match what the user sees regardless of server timezone. The END bound
+    // keeps future-dated transactions out of this month's spending.
     const { searchParams } = new URL(req.url);
-    const startParam = searchParams.get("start")
-      ? new Date(searchParams.get("start"))
-      : null;
-    const monthParam = searchParams.get("month");
+    const parseInstant = (value) => {
+      if (!value) return null;
+      const parsed = new Date(value);
+      return isNaN(parsed.getTime()) ? null : parsed;
+    };
     const today = new Date();
     const startOfMonth =
-      startParam && !isNaN(startParam.getTime())
-        ? startParam
-        : new Date(today.getFullYear(), today.getMonth(), 1);
-    const monthKey = /^\d{4}-\d{2}$/.test(monthParam || "")
-      ? monthParam
+      parseInstant(searchParams.get("start")) ||
+      new Date(today.getFullYear(), today.getMonth(), 1);
+    const endOfMonth =
+      parseInstant(searchParams.get("end")) ||
+      new Date(startOfMonth.getFullYear(), startOfMonth.getMonth() + 1, 1);
+    const monthKey = /^\d{4}-\d{2}$/.test(searchParams.get("month") || "")
+      ? searchParams.get("month")
       : `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
 
     // Get all budgets for this month
@@ -45,7 +49,7 @@ export async function GET(req) {
         $match: {
           userId,
           type: "expense",
-          date: { $gte: startOfMonth },
+          date: { $gte: startOfMonth, $lt: endOfMonth },
           excludeFromBudget: { $ne: true },
         },
       },
@@ -71,7 +75,7 @@ export async function GET(req) {
         $match: {
           userId,
           type: "expense",
-          date: { $gte: startOfMonth },
+          date: { $gte: startOfMonth, $lt: endOfMonth },
           excludeFromBudget: true,
         },
       },

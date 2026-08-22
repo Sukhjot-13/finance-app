@@ -13,12 +13,13 @@ export default function BudgetProgress() {
 
   useEffect(() => {
     // Client-local month window + month key so the server compares against
-    // the budget month the user actually means.
+    // the budget month the user actually means (and ignores future dates).
     const now = new Date();
     const start = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+    const end = new Date(now.getFullYear(), now.getMonth() + 1, 1).toISOString();
     const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
     api(
-      `/api/reports/budget-progress?start=${encodeURIComponent(start)}&month=${month}`
+      `/api/reports/budget-progress?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}&month=${month}`
     )
       .then((res) => {
         if (!res.ok) throw new Error("Failed to load budget progress");

@@ -6,8 +6,12 @@ export async function proxy(request) {
   const refreshToken = request.cookies.get("refreshToken")?.value;
 
   // If the user is logged in (has a refresh token) and tries to
-  // access the login or welcome page, redirect them to the dashboard.
-  if (refreshToken && (pathname === "/login" || pathname === "/welcome")) {
+  // access the login page, redirect them to the dashboard.
+  // NOTE: /welcome is intentionally NOT bounced — a brand-new user lands
+  // there straight after OTP verification (with cookies already set), and
+  // bouncing them would break onboarding entirely. Anonymous visitors are
+  // still redirected to /login by the publicPaths check below.
+  if (refreshToken && pathname === "/login") {
     return NextResponse.redirect(new URL("/dashboard", request.url));
   }
 
@@ -15,7 +19,6 @@ export async function proxy(request) {
   // All /api routes are excluded — they handle their own auth (return 401 when unauthenticated).
   const publicPaths = [
     "/login",
-    "/welcome",
     "/api",
   ];
 

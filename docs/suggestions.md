@@ -6,6 +6,12 @@
 
 ## 🟢 Improvements
 
+### Fix broken `/welcome` onboarding bounce (2026-08-22)
+Full re-audit (see `docs/audit.md` H1): the proxy redirects any logged-in request from `/welcome` → `/dashboard`, so brand-new users (who have cookies right after OTP verify) never see the account-name screen. Verified live: 307 redirect. Remove `/welcome` from the proxy bounce list or prompt inline on first dashboard visit.
+
+### Add month-end bounds to dashboard/budget-progress aggregations (2026-08-22)
+Audit H2: `$gte: startOfMonth` has no `$lt` end bound, so future-dated transactions inflate "This Month" stats and budget bars until their date arrives. Client already sends `start`; send `end` too.
+
 ### Deploy the audit fixes (a1–a8) — email normalization is critical (2026-08-22)
 The lowercase-email normalization (`findUserByEmail` in both OTP routes) that prevents duplicate accounts from case-variant logins exists in local commits a1–a8 but is **not pushed/deployed** — prod still auto-creates a fresh account whenever the email is typed differently. Push and deploy to activate.
 

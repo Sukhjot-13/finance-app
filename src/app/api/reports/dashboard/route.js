@@ -17,16 +17,22 @@ export async function GET(req) {
   try {
     const userId = new mongoose.Types.ObjectId(user._id);
 
-    // Prefer the client's local month start (an absolute instant) so the
+    // Prefer the client's local month start/end (absolute instants) so the
     // window matches what the user sees regardless of server timezone.
+    // The END bound matters: without it, future-dated transactions would
+    // count toward "this month" until their date arrives.
     const { searchParams } = new URL(req.url);
-    const startParam = searchParams.get("start")
-      ? new Date(searchParams.get("start"))
-      : null;
+    const parseInstant = (value) => {
+      if (!value) return null;
+      const parsed = new Date(value);
+      return isNaN(parsed.getTime()) ? null : parsed;
+    };
     const startOfMonth =
-      startParam && !isNaN(startParam.getTime())
-        ? startParam
-        : new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+      parseInstant(searchParams.get("start")) ||
+      new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+    const endOfMonth =
+      parseInstant(searchParams.get("end")) ||
+      new Date(startOfMonth.getFullYear(), startOfMonth.getMonth() + 1, 1);
 
     // Aggregations
     const balancePromise = Transaction.aggregate([
@@ -40,7 +46,7 @@ export async function GET(req) {
     ]);
 
     const monthlyPromise = Transaction.aggregate([
-      { $match: { userId, date: { $gte: startOfMonth } } },
+      { $match: { userId, date: { $gte: startOfMonth, $lt: endOfMonth } } },
       {
         $group: {
           _id: "$type",
@@ -54,7 +60,7 @@ export async function GET(req) {
         $match: {
           userId,
           type: "expense",
-          date: { $gte: startOfMonth },
+          date: { $gte: startOfMonth, $lt: endOfMonth },
         },
       },
       {
