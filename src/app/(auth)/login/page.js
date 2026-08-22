@@ -22,17 +22,29 @@ export default function LoginPage() {
     return () => clearInterval(timer);
   }, [resendIn]);
 
-  // Check if already logged in and redirect
+  // Check if already logged in and redirect. A 401 here usually means only
+  // the SHORT-LIVED access token expired — the refresh cookie is still valid
+  // for 30 days, so attempt one silent refresh before giving up and showing
+  // the OTP form. Without this, returning users get bounced into a full
+  // re-login every time the 15-minute access cookie lapses.
   useEffect(() => {
     const checkSession = async () => {
       try {
-        const res = await fetch("/api/user");
+        let res = await fetch("/api/user");
+        if (!res.ok && res.status === 401) {
+          const refreshRes = await fetch("/api/auth/refresh", {
+            method: "POST",
+          });
+          if (refreshRes.ok) {
+            res = await fetch("/api/user");
+          }
+        }
         if (res.ok) {
           router.replace("/dashboard");
           return;
         }
       } catch {
-        // Not authenticated, stay on login
+        // Network trouble — fall through and stay on login
       }
       setCheckingSession(false);
     };

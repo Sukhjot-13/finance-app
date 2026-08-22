@@ -380,7 +380,7 @@ describe("POST /api/auth/refresh (rotation + grace + reuse detection)", () => {
     expect(jar.accessToken).toBeTruthy();
   });
 
-  it("ROTATED token within the 60s grace window → access-only mint (multi-tab safe)", async () => {
+  it("ROTATED token within the grace window → access-only mint (multi-tab safe)", async () => {
     const raw = realAuth.generateRefreshToken("uid1");
     const { res, jar } = await refreshAs({
       raw,
@@ -404,7 +404,7 @@ describe("POST /api/auth/refresh (rotation + grace + reuse detection)", () => {
     const raw = realAuth.generateRefreshToken("uid1");
     const { res, store } = await refreshAs({
       raw,
-      userDoc: makeSessionUser(realAuth.hashToken(raw), new Date(Date.now() - 61_000)),
+      userDoc: makeSessionUser(realAuth.hashToken(raw), new Date(Date.now() - 6 * 60_000)),
     });
 
     expect(res.status).toBe(401);

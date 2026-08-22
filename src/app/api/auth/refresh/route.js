@@ -106,12 +106,15 @@ export async function POST() {
         { $push: { refreshTokens: { token: hashToken(newRefreshToken) } } }
       );
 
+      // sameSite "lax" — strict broke top-level arrivals from external
+      // links (cookies withheld → proxy treated the user as anonymous).
+      // Lax keeps cross-site POSTs cookieless, so CSRF safety is unchanged.
       cookieStore.set("refreshToken", newRefreshToken, {
         httpOnly: true,
         secure: process.env.NODE_ENV === "production",
         maxAge: 30 * 24 * 60 * 60, // 30 days
         path: "/",
-        sameSite: "strict",
+        sameSite: "lax",
       });
     }
     // Rotated-but-within-grace: fall through and just mint an access token.
@@ -124,7 +127,7 @@ export async function POST() {
       secure: process.env.NODE_ENV === "production",
       maxAge: 15 * 60, // 15 minutes
       path: "/",
-      sameSite: "strict",
+      sameSite: "lax",
     });
 
     // 5. Opportunistically prune expired + rotated-past-grace tokens (TTL

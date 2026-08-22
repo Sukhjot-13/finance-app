@@ -92,7 +92,7 @@ describe("purgeExpiredRefreshTokens", () => {
       $lt: expect.any(Date),
     });
     expect(pull[1].rotatedAt.$lt.getTime()).toBeCloseTo(
-      Date.now() - 60 * 1000,
+      Date.now() - auth.REFRESH_ROTATION_GRACE_MS,
       -3
     );
   });

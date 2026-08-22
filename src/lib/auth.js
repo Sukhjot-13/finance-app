@@ -11,10 +11,10 @@ const REFRESH_TOKEN_SECRET = process.env.REFRESH_TOKEN_SECRET;
 export const REFRESH_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
 // How long a rotated-away refresh token still authenticates. This absorbs
-// multi-tab races (two tabs refreshing with the same cookie at once) so
-// rotation never logs people out. After the grace window a presented
-// rotated token is treated as token theft (reuse detection).
-export const REFRESH_ROTATION_GRACE_MS = 60 * 1000;
+// multi-tab races and browsers that apply Set-Cookie from fetch responses
+// late (e.g. Safari under ITP), so rotation never logs people out. After
+// the grace window a presented rotated token is treated as token theft.
+export const REFRESH_ROTATION_GRACE_MS = 5 * 60 * 1000;
 
 if (!ACCESS_TOKEN_SECRET || !REFRESH_TOKEN_SECRET) {
   throw new Error("Missing JWT secret environment variables.");

@@ -61,7 +61,10 @@ A Next.js 16 personal finance tracking application with OTP-based authentication
   - `RootLayout()` - Renders `<html>` and `<body>` with Inter font and global styles. Defines metadata (title: "Finance Tracker"). Exports `dynamic = "force-dynamic"` — REQUIRED so the proxy-generated CSP nonce is stamped onto Next's inline bootstrap scripts in production builds (static prerendering cannot carry per-request nonces).
 
 - **`src/app/page.js`** - Root page (entry point at `/`). Checks authentication and redirects.
-  - `RootPage()` (async) - Calls `verifyAuth()`. If authenticated, redirects to `/dashboard`. Otherwise redirects to `/login`.
+  - `RootPage()` (async) - Calls `verifyAuth()`. If authenticated, redirects to `/dashboard`. Otherwise renders `SessionGate` — it no longer hard-redirects to `/login`, because an expired 15-minute access cookie does NOT mean the 30-day refresh session is dead.
+
+- **`src/app/session-gate.js`** *(new)* - Client-side fallback for the root page.
+  - `SessionGate()` - Rendered when server-side `verifyAuth()` fails. Attempts ONE silent `POST /api/auth/refresh`: success → `/dashboard`, failure/network error → `/login`. Shows the bouncing-pig loading screen while deciding. Prevents returning users from being forced into OTP re-logins when only the short-lived access token lapsed.
 
 - **`src/app/globals.css`** - Global styles. Imports Tailwind CSS v4 (`@import "tailwindcss"`). Defines `@theme` block (currently commented out). Sets `box-sizing: border-box` globally.
 
@@ -76,7 +79,7 @@ A Next.js 16 personal finance tracking application with OTP-based authentication
 ### Auth Module (`/src/app/(auth)/`)
 
 - **`src/app/(auth)/login/page.js`** - Login page with OTP flow ("use client").
-  - `LoginPage()` - Two-step form: Step 1 collects email, calls `/api/auth/otp/send` (surfaces the server's specific error messages, e.g. rate-limit). Step 2 collects OTP (numeric input, `autoComplete="one-time-code"`) with auto-submit at 6 digits, a **Resend code button with a 30s cooldown**, and "Use a different email". On success, redirects based on `isNewUser` (new → `/welcome`, returning → `/dashboard`). Auto-redirects on mount if already authenticated. State: `email`, `otp`, `step`, `loading`, `error`, `checkingSession`, `resendIn`. Uses raw `fetch()` deliberately — the `api()` wrapper's failed-refresh redirect to `/login` would loop on this page.
+  - `LoginPage()` - Two-step form: Step 1 collects email, calls `/api/auth/otp/send` (surfaces the server's specific error messages, e.g. rate-limit). Step 2 collects OTP (numeric input, `autoComplete="one-time-code"`) with auto-submit at 6 digits, a **Resend code button with a 30s cooldown**, and "Use a different email". On success, redirects based on `isNewUser` (new → `/welcome`, returning → `/dashboard`). Auto-redirects on mount if already authenticated — the mount check calls `/api/user` and on a 401 attempts ONE silent `/api/auth/refresh` before re-checking, so users with a live refresh cookie are sent to `/dashboard` instead of being shown the OTP form. State: `email`, `otp`, `step`, `loading`, `error`, `checkingSession`, `resendIn`. Uses raw `fetch()` deliberately — the `api()` wrapper's failed-refresh redirect to `/login` would loop on this page.
 
 - **`src/app/(auth)/welcome/page.js`** - Welcome/onboarding page for new users ("use client").
   - `WelcomePage()` - Collects `accountName` (maxLength 60) via form, submits to `PUT /api/user` with `{ accountName, onboarded: true }`. Includes a **Skip for now** button that PUTs `{ onboarded: true }` first (so skipped users are never re-prompted) then goes to `/dashboard`. On success, redirects to `/dashboard`. State: `accountName`, `loading`, `error`.
@@ -128,13 +131,13 @@ A Next.js 16 personal finance tracking application with OTP-based authentication
   - Body parsing happens INSIDE try — malformed JSON returns a controlled 400 "Invalid request body." (never a framework 500).
   - Brute-force lockout via Mongo-backed sliding window: ≥5 failures per email inside 15 minutes → uniform 429. Success clears the key (`resetKey`).
   - `DUMMY_HASH` - Real bcrypt hash compared against when no pending OTP exists, so response timing cannot reveal which emails have live codes.
-  - `POST` - Uniform failure message everywhere; bcrypt compare ALWAYS runs. On success: clears OTP fields + failure history, generates access (15m) + refresh (30d) tokens, stores the refresh token as a **SHA-256 hash** (`hashToken`), purges expired sessions, sets httpOnly cookies (sameSite strict). Returns `{ isNewUser }` computed as `!accountName && !onboarded`, so users who completed OR skipped onboarding go straight to the dashboard on later logins.
+  - `POST` - Uniform failure message everywhere; bcrypt compare ALWAYS runs. On success: clears OTP fields + failure history, generates access (15m) + refresh (30d) tokens, stores the refresh token as a **SHA-256 hash** (`hashToken`), purges expired sessions, sets httpOnly cookies (sameSite lax — strict withheld cookies from external-link arrivals and looked like a logout; lax still blocks cross-site POSTs). Returns `{ isNewUser }` computed as `!accountName && !onboarded`, so users who completed OR skipped onboarding go straight to the dashboard on later logins.
 
 - **`src/app/api/auth/refresh/route.js`** - Refreshes access token. Implements **rotation + grace window + reuse detection**:
   - JWT verified first (bad/expired → cookies cleared, 401).
   - Session looked up by SHA-256 hash (legacy plaintext entries still matched until expiry).
   - ACTIVE token → rotate: entry marked `rotatedAt = now`, new hashed token pushed, new refresh cookie set.
-  - ROTATED token **within 60s grace** → concurrent tab/duplicate request: mints only a fresh access token; nothing else touched.
+  - ROTATED token **within 5-min grace** → concurrent tab/duplicate request: mints only a fresh access token; nothing else touched.
   - ROTATED token **past grace** → reuse treated as theft: ALL of the user's sessions revoked, cookies cleared, 401.
   - `dbConnect()` runs INSIDE try — DB outage returns retryable 500 without clearing cookies. Opportunistic prune of expired + rotated-past-grace entries.
 
@@ -205,7 +208,7 @@ A Next.js 16 personal finance tracking application with OTP-based authentication
 - **`src/lib/mongodb.js`** - Singleton Mongoose connection (`bufferCommands:false`, pool 10, timeouts). Resets cached promise on failure.
 
 - **`src/lib/auth.js`** - Authentication utilities.
-  - Constants: `ACCESS_TOKEN_SECRET`, `REFRESH_TOKEN_SECRET` (throw at import if missing), `REFRESH_TOKEN_TTL_MS` (30d), `REFRESH_ROTATION_GRACE_MS` (60s).
+  - Constants: `ACCESS_TOKEN_SECRET`, `REFRESH_TOKEN_SECRET` (throw at import if missing), `REFRESH_TOKEN_TTL_MS` (30d), `REFRESH_ROTATION_GRACE_MS` (5 min).
   - `hashToken(token)` - SHA-256 hex digest used to store/lookup refresh tokens.
   - `generateAccessToken(userId)` / `generateRefreshToken(userId)` (includes `jti`).
   - `verifyToken(token, secret)` - jsonwebtoken verify wrapper returning null on error.
@@ -254,9 +257,9 @@ A Next.js 16 personal finance tracking application with OTP-based authentication
 
 1. **Login**: email → OTP generated with `crypto.randomInt` (CSPRNG), sent via Brevo. Limits (Mongo-backed, shared across instances): 5/hour/email + 20/hour/IP; slots refunded on send failure; previous pending OTP restored if the email fails.
 2. **OTP Verify**: Mongo-backed lockout (5 failures / sliding 15min → uniform 429); bcrypt compare always runs (dummy-hash timing equalization); uniform failure messages (no enumeration).
-3. **Session**: access (15m) + refresh (30d) httpOnly sameSite=strict cookies. Refresh tokens stored in the user document as **SHA-256 hashes**; expired entries pruned opportunistically on login/refresh.
+3. **Session**: access (15m) + refresh (30d) httpOnly sameSite=lax cookies (lax so external-link arrivals keep their session; cross-site POSTs remain cookieless). Refresh tokens stored in the user document as **SHA-256 hashes**; expired entries pruned opportunistically on login/refresh.
 4. **Verification**: all data routes use `verifySession()` (DB-backed revocation) with 401-vs-503 classification.
-5. **Token Refresh**: automatic via `api()` (single-flight per tab, Web-Lock serialized across tabs). Rotation marks the old entry `rotatedAt` and stores a fresh hash; duplicates within the 60s grace window get an access token only; presenting a rotated token AFTER grace revokes every session (reuse detection).
+5. **Token Refresh**: automatic via `api()` (single-flight per tab, Web-Lock serialized across tabs). Rotation marks the old entry `rotatedAt` and stores a fresh hash; duplicates within the 5-minute grace window get an access token only; presenting a rotated token AFTER grace revokes every session (reuse detection). The root page (`SessionGate`) and the login page's mount check also refresh silently, so a lapsed 15-minute access cookie never forces an OTP re-login while the 30-day session lives.
 6. **Logout**: single-session `$pull` by hash (legacy raw accepted); logout-all empties the array honestly.
 7. **Proxy**: guards routes (anon → `/login`; authed away from `/login` only) and injects the per-request CSP nonce.
 

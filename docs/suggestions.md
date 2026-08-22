@@ -6,6 +6,12 @@
 
 ## 🟢 Improvements
 
+### Fixed: users logged out too often (2026-08-22)
+Three compounding causes found and fixed:
+1. **Dead-end at `/` and `/login` after 15 min idle** — `verifyAuth()` on the root page only checked the 15-minute access cookie, and LoginPage's session check used a raw fetch that never attempted a refresh → valid 30-day sessions were bounced into full OTP re-logins. Fixed via `SessionGate` (`src/app/session-gate.js`) + refresh-rescue in LoginPage's `checkSession`.
+2. **`sameSite: "strict"` cookies** — cookies are withheld on top-level navigations from other sites, so arriving via an email/Slack/Google link looked logged-out and hit the login page. Changed to `"lax"` (cross-site POSTs still cookieless, CSRF posture unchanged).
+3. **60s rotation grace + revoke-all-on-reuse** — too tight for multi-tab races and browsers that apply Set-Cookie late (Safari/ITP); false-positive "theft" detection nuked every session. Grace widened to 5 minutes.
+
 ### Deploy the pending commits — email normalization is critical (2026-08-22)
 ~17 local commits (audit fixes + session hardening + test suite) are **not pushed/deployed** — prod still auto-creates a fresh account whenever the email is typed differently (missing lowercase normalization). Push and deploy to activate.
 

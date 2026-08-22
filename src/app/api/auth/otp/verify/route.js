@@ -109,14 +109,18 @@ export async function POST(req) {
     // TTL indexes don't work on subdocument arrays — prune stale sessions
     await purgeExpiredRefreshTokens(user._id);
 
-    // Set cookies
+    // Set cookies. sameSite "lax" (not "strict"): strict cookies are NOT
+    // sent on top-level navigations from other sites, so following an
+    // external link to the app looked like a logged-out visit and bounced
+    // users to /login. Lax still withholds cookies from cross-site POSTs,
+    // so CSRF protection for mutating endpoints is unaffected.
     const cookieStore = await cookies();
     cookieStore.set("accessToken", accessToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       maxAge: 15 * 60, // 15 minutes
       path: "/",
-      sameSite: "strict",
+      sameSite: "lax",
     });
 
     cookieStore.set("refreshToken", refreshToken, {
@@ -124,7 +128,7 @@ export async function POST(req) {
       secure: process.env.NODE_ENV === "production",
       maxAge: 30 * 24 * 60 * 60, // 30 days
       path: "/",
-      sameSite: "strict",
+      sameSite: "lax",
     });
 
     // New = no name AND onboarding never completed (skip counts as done),
