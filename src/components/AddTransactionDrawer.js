@@ -1,7 +1,7 @@
 // src/components/AddTransactionDrawer.js
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { X, Plus, Minus } from "lucide-react";
 import api from "@/lib/api";
@@ -101,7 +101,7 @@ export default function AddTransactionDrawer({
 
     let finalCategory = category;
     if (isAddingNewCategory) {
-      if (!newCategory) {
+      if (!newCategory.trim()) {
         setError("Please enter a name for the new category.");
         setLoading(false);
         return;
@@ -110,10 +110,20 @@ export default function AddTransactionDrawer({
         const res = await api("/api/categories", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name: newCategory, type }),
+          body: JSON.stringify({ name: newCategory.trim(), type }),
         });
-        if (!res.ok) throw new Error("Failed to create category.");
-        finalCategory = newCategory;
+        if (!res.ok) {
+          // Surface the server's reason (e.g. 409 duplicate) instead of a
+          // generic failure message.
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.message || "Failed to create category.");
+        }
+        finalCategory = newCategory.trim();
+        // Switch back to the dropdown with the fresh category preselected so
+        // an immediate retry can't double-create it.
+        setIsAddingNewCategory(false);
+        setNewCategory("");
+        setCategory(finalCategory);
         fetchCategories(); // Refresh the dropdown list
       } catch (err) {
         setError(err.message);
@@ -155,8 +165,7 @@ export default function AddTransactionDrawer({
     }
   };
 
-  const handleClose = () => {
-    // Reset form state on close
+  const resetForm = useCallback(() => {
     setType("expense");
     setAmount("");
     setCategory("");
@@ -166,8 +175,27 @@ export default function AddTransactionDrawer({
     setDescription("");
     setExcludeFromBudget(false);
     setError("");
+  }, []);
+
+  const handleClose = useCallback(() => {
+    resetForm();
     onClose();
-  };
+  }, [resetForm, onClose]);
+
+  // Escape closes the drawer; body scroll is locked while it's open.
+  useEffect(() => {
+    if (!isOpen) return undefined;
+    const onKey = (e) => {
+      if (e.key === "Escape") handleClose();
+    };
+    document.addEventListener("keydown", onKey);
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [isOpen, handleClose]);
 
   const currentCategories =
     type === "expense" ? categories.expense : categories.income;
@@ -241,6 +269,7 @@ export default function AddTransactionDrawer({
                   id="amount"
                   type="number"
                   step="0.01"
+                  min="0.01"
                   required
                   value={amount}
                   onChange={(e) => setAmount(e.target.value)}
@@ -283,13 +312,14 @@ export default function AddTransactionDrawer({
                   >
                     New Category Name
                   </label>
-                  <input
-                    id="newCategory"
-                    type="text"
-                    value={newCategory}
-                    onChange={(e) => setNewCategory(e.target.value)}
-                    className="mt-1 w-full px-3 py-2 border border-slate-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-                  />
+                <input
+                  id="newCategory"
+                  type="text"
+                  value={newCategory}
+                  onChange={(e) => setNewCategory(e.target.value)}
+                  maxLength={50}
+                  className="mt-1 w-full px-3 py-2 border border-slate-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                />
                 </div>
               )}
 
@@ -322,6 +352,7 @@ export default function AddTransactionDrawer({
                   type="text"
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
+                  maxLength={200}
                   placeholder="e.g., Coffee with friends"
                   className="mt-1 w-full px-3 py-2 border border-slate-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
                 />

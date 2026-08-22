@@ -36,6 +36,45 @@ function checkRateLimit(email) {
 }
 
 /**
+ * Refunds a rate-limit slot when the email send itself failed — service
+ * outages shouldn't burn the user's quota.
+ */
+function refundRateLimit(email) {
+  const key = String(email).toLowerCase();
+  const attempts = otpAttempts.get(key);
+  if (!attempts || attempts.length === 0) return;
+  attempts.pop();
+  if (attempts.length === 0) otpAttempts.delete(key);
+}
+
+// Per-IP cap: stops one address from OTP-bombing many different emails.
+// (Per-email caps alone leave the SENDER unlimited.) 20 sends/hour/IP.
+const MAX_PER_IP_PER_HOUR = 20;
+const ipAttempts = new Map();
+
+function checkIpRateLimit(ip) {
+  const now = Date.now();
+  const attempts = ipAttempts.get(ip) || [];
+  const recent = attempts.filter((t) => now - t < 60 * 60 * 1000);
+  if (recent.length >= MAX_PER_IP_PER_HOUR) return false;
+  recent.push(now);
+  ipAttempts.set(ip, recent);
+  // Opportunistic sweep
+  if (ipAttempts.size > 1000) {
+    for (const [key, stamps] of ipAttempts) {
+      if (stamps.every((t) => now - t >= 60 * 60 * 1000)) ipAttempts.delete(key);
+    }
+  }
+  return true;
+}
+
+function getClientIp(request) {
+  const forwarded = request.headers.get("x-forwarded-for");
+  if (forwarded) return forwarded.split(",")[0].trim();
+  return request.headers.get("x-real-ip") || "unknown";
+}
+
+/**
  * Finds a user by email. New accounts are always stored lowercased; the
  * exact-match fallback keeps legacy mixed-case signups reachable.
  */
@@ -69,8 +108,15 @@ export async function POST(request) {
       );
     }
 
-    // Check rate limiting
+    // Check rate limiting (per email AND per IP)
     if (!checkRateLimit(email.toLowerCase())) {
+      return NextResponse.json(
+        { message: "Too many OTP requests. Please wait before trying again." },
+        { status: 429 }
+      );
+    }
+    const clientIp = getClientIp(request);
+    if (!checkIpRateLimit(clientIp)) {
       return NextResponse.json(
         { message: "Too many OTP requests. Please wait before trying again." },
         { status: 429 }
@@ -86,9 +132,28 @@ export async function POST(request) {
       user = new User({ email: email.trim().toLowerCase() });
     }
 
+    // Remember any still-pending OTP so a failed email send can restore it
+    // instead of destroying a code the user may already be typing.
+    const previousOtp = user.otp;
+    const previousOtpExpires = user.otpExpires;
+
     user.otp = otp;
     user.otpExpires = otpExpires;
-    await user.save();
+    try {
+      await user.save();
+    } catch (saveError) {
+      if (saveError.code === 11000) {
+        // Concurrent signup race: another request created this user between
+        // our findOne and save — refetch and set the OTP on that document.
+        user = await findUserByEmail(email);
+        if (!user) throw saveError;
+        user.otp = otp;
+        user.otpExpires = otpExpires;
+        await user.save();
+      } else {
+        throw saveError;
+      }
+    }
 
     // Instantiate the Brevo API client using named imports
     let apiInstance = new TransactionalEmailsApi();
@@ -110,8 +175,22 @@ export async function POST(request) {
         </div>
     `;
 
-    // Send the email
-    await apiInstance.sendTransacEmail(sendSmtpEmail);
+    try {
+      // Send the email
+      await apiInstance.sendTransacEmail(sendSmtpEmail);
+    } catch (sendError) {
+      // The stored code was never delivered — restore whatever pending OTP
+      // existed before this request and give the rate-limit slot back.
+      try {
+        user.otp = previousOtp;
+        user.otpExpires = previousOtpExpires;
+        await user.save();
+      } catch (restoreError) {
+        console.error("OTP restore after failed send error:", restoreError.message);
+      }
+      refundRateLimit(email);
+      throw sendError;
+    }
 
     return NextResponse.json(
       { message: "OTP sent successfully." },
@@ -119,12 +198,14 @@ export async function POST(request) {
     );
   } catch (error) {
     console.error("OTP Send Error:", error);
-    
-    // Don't expose internal errors to the client
-    const message = error.message.includes('BREVO_API_KEY') 
+
+    // Don't expose internal errors to the client (message can be undefined
+    // for non-Error throws).
+    const rawMessage = typeof error?.message === "string" ? error.message : "";
+    const message = rawMessage.includes("BREVO_API_KEY")
       ? "Email service configuration error. Please contact support."
       : "Failed to send OTP. Please try again later.";
-      
+
     return NextResponse.json(
       { message },
       { status: 500 }

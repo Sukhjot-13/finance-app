@@ -26,6 +26,19 @@ function StatCard({ title, value, icon: Icon, colorClass = "text-slate-800" }) {
   );
 }
 
+// Generates a distinct color per slice, no matter how many categories exist.
+function generateSliceColors(count) {
+  const basePalette = [
+    "#ef4444", "#3b82f6", "#f97316", "#14b8a6",
+    "#8b5cf6", "#eab308", "#d946ef",
+  ];
+  return Array.from({ length: count }, (_, i) => {
+    if (i < basePalette.length) return basePalette[i];
+    // Evenly spaced hues for anything beyond the curated palette.
+    return `hsl(${(i * 137.5) % 360}, 70%, 55%)`;
+  });
+}
+
 function DashboardSkeleton() {
   return (
     <div className="animate-pulse">
@@ -125,10 +138,7 @@ export default function DashboardPage() {
     datasets: [
       {
         data: data.expenseBreakdown.map((item) => item.total),
-        backgroundColor: [
-          "#ef4444", "#3b82f6", "#f97316", "#14b8a6",
-          "#8b5cf6", "#eab308", "#d946ef",
-        ],
+        backgroundColor: generateSliceColors(data.expenseBreakdown.length),
         borderColor: "#ffffff",
         borderWidth: 2,
       },

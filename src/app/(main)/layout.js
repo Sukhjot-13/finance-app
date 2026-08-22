@@ -1,7 +1,7 @@
 // src/app/(main)/layout.js
 "use client";
 
-import { useState, useEffect, createContext, useContext } from "react";
+import { useState, useEffect, useRef, createContext, useContext } from "react";
 import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
 import {
@@ -102,6 +102,26 @@ function ProfileDropdown() {
   const [isOpen, setIsOpen] = useState(false);
   const { user } = useContext(UserContext);
   const router = useRouter();
+  const menuRef = useRef(null);
+
+  // Close on outside click or Escape; proper menu semantics for a11y.
+  useEffect(() => {
+    if (!isOpen) return undefined;
+    const onPointerDown = (e) => {
+      if (menuRef.current && !menuRef.current.contains(e.target)) {
+        setIsOpen(false);
+      }
+    };
+    const onKeyDown = (e) => {
+      if (e.key === "Escape") setIsOpen(false);
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [isOpen]);
 
   const handleLogout = async () => {
     try {
@@ -116,9 +136,12 @@ function ProfileDropdown() {
   if (!user) return null;
 
   return (
-    <div className="relative">
+    <div className="relative" ref={menuRef}>
       <button
         onClick={() => setIsOpen(!isOpen)}
+        aria-haspopup="menu"
+        aria-expanded={isOpen}
+        aria-label="Account menu"
         className="flex items-center gap-2 text-slate-600 hover:text-slate-900 focus:outline-none"
       >
         <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center">

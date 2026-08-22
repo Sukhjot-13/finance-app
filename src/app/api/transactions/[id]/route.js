@@ -3,6 +3,7 @@ import dbConnect from "@/lib/mongodb";
 import Transaction from "@/models/transaction.model";
 import { verifySession } from "@/lib/auth"; // Using the secure session verifier
 import { sendError, sendSuccess } from "@/lib/server-utils";
+import mongoose from "mongoose";
 
 /**
  * GET a single transaction by its ID.
@@ -12,6 +13,10 @@ export async function GET(request, { params }) {
   if (error || !user) return sendError(error || "Unauthorized", sessionStatus || 401);
 
   const { id } = await params;
+
+  if (!mongoose.isValidObjectId(id)) {
+    return sendError("Transaction not found", 404);
+  }
 
   try {
     await dbConnect();
@@ -39,6 +44,10 @@ export async function PUT(request, { params }) {
   if (error || !user) return sendError(error || "Unauthorized", sessionStatus || 401);
 
   const { id } = await params;
+
+  if (!mongoose.isValidObjectId(id)) {
+    return sendError("Transaction not found", 404);
+  }
 
   try {
     await dbConnect();
@@ -84,6 +93,10 @@ export async function DELETE(request, { params }) {
   if (error || !user) return sendError(error || "Unauthorized", sessionStatus || 401);
 
   const { id } = await params;
+
+  if (!mongoose.isValidObjectId(id)) {
+    return sendError("Transaction not found", 404);
+  }
 
   try {
     await dbConnect();

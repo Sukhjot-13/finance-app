@@ -37,6 +37,20 @@ function EditTransactionModal({ transaction, onClose, onSave }) {
     fetchCategories();
   }, [transaction]);
 
+  // Escape closes the modal; body scroll is locked while it's open.
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [onClose]);
+
   const handleChange = (e) => {
     const { name, value } = e.target;
     if (name === "category" && value === "add_new") {
@@ -162,6 +176,8 @@ function EditTransactionModal({ transaction, onClose, onSave }) {
                 type="number" name="amount" value={formData.amount}
                 onChange={handleChange}
                 className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2"
+                step="0.01"
+                min="0.01"
                 required
               />
             </div>
@@ -208,6 +224,7 @@ function EditTransactionModal({ transaction, onClose, onSave }) {
                 type="text" name="description" value={formData.description || ''}
                 onChange={handleChange}
                 className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2"
+                maxLength={200}
               />
             </div>
             {formData.type === "expense" && (
@@ -582,6 +599,7 @@ export default function TransactionsPage() {
                 <th className="p-3 text-xs font-medium text-slate-500 uppercase">Date</th>
                 <th className="p-3 text-xs font-medium text-slate-500 uppercase">Type</th>
                 <th className="p-3 text-xs font-medium text-slate-500 uppercase">Category</th>
+                <th className="p-3 text-xs font-medium text-slate-500 uppercase">Description</th>
                 <th className="p-3 text-xs font-medium text-slate-500 uppercase">Amount</th>
                 <th className="p-3 text-xs font-medium text-slate-500 uppercase">Actions</th>
               </tr>
@@ -608,6 +626,9 @@ export default function TransactionsPage() {
                         One-time
                       </span>
                     )}
+                  </td>
+                  <td className="p-3 text-sm text-slate-500 max-w-[220px] truncate" title={t.description || ""}>
+                    {t.description || "—"}
                   </td>
                   <td
                     className={`p-3 text-sm font-semibold ${

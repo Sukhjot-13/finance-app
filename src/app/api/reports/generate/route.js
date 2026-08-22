@@ -7,33 +7,48 @@ import { verifySession } from "@/lib/auth";
 export async function POST(request) {
   const { user, status } = await verifySession();
   if (!user)
-    return NextResponse.json({ message: "Not authenticated" }, { status: 401 });
-
-  await dbConnect();
-  const { startDate, endDate, startInstant, endInstant } = await request.json();
-
-  if (!startDate || !endDate) {
-    return NextResponse.json(
-      { message: "Start date and end date are required" },
-      { status: 400 }
-    );
-  }
-
-  // Prefer absolute instants computed in the BROWSER (user's timezone) so the
-  // window matches the user's calendar days; fall back to legacy string
-  // parsing (server-local) when they're absent.
-  const parsedStart = startInstant ? new Date(startInstant) : null;
-  const parsedEnd = endInstant ? new Date(endInstant) : null;
-  const rangeStart =
-    parsedStart && !isNaN(parsedStart.getTime())
-      ? parsedStart
-      : new Date(startDate + "T00:00:00");
-  const rangeEnd =
-    parsedEnd && !isNaN(parsedEnd.getTime())
-      ? parsedEnd
-      : new Date(endDate + "T23:59:59.999");
+    return NextResponse.json({ message: "Not authenticated" }, { status: status || 401 });
 
   try {
+    await dbConnect();
+    const { startDate, endDate, startInstant, endInstant } =
+      await request.json();
+
+    if (!startDate || !endDate) {
+      return NextResponse.json(
+        { message: "Start date and end date are required" },
+        { status: 400 }
+      );
+    }
+
+    // Prefer absolute instants computed in the BROWSER (user's timezone) so
+    // the window matches the user's calendar days; fall back to legacy string
+    // parsing (server-local) when they're absent.
+    const parsedStart = startInstant ? new Date(startInstant) : null;
+    const parsedEnd = endInstant ? new Date(endInstant) : null;
+    const rangeStart =
+      parsedStart && !isNaN(parsedStart.getTime())
+        ? parsedStart
+        : new Date(startDate + "T00:00:00");
+    const rangeEnd =
+      parsedEnd && !isNaN(parsedEnd.getTime())
+        ? parsedEnd
+        : new Date(endDate + "T23:59:59.999");
+
+    if (isNaN(rangeStart.getTime()) || isNaN(rangeEnd.getTime())) {
+      return NextResponse.json(
+        { message: "Invalid date format" },
+        { status: 400 }
+      );
+    }
+
+    if (rangeStart > rangeEnd) {
+      return NextResponse.json(
+        { message: "Start date must be on or before the end date" },
+        { status: 400 }
+      );
+    }
+
     const transactions = await Transaction.find({
       userId: user._id,
       date: { $gte: rangeStart, $lte: rangeEnd },

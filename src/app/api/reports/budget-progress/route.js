@@ -13,9 +13,8 @@ export async function GET(req) {
     return NextResponse.json({ message: "Unauthorized" }, { status: status || 401 });
   }
 
-  await dbConnect();
-
   try {
+    await dbConnect();
     const userId = new mongoose.Types.ObjectId(user._id);
 
     // Prefer the client's local month start/end + month key so budget windows

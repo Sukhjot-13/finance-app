@@ -38,6 +38,16 @@ export default function ReportsPage() {
   const { user } = useContext(UserContext); // Get user from context
 
   const generateReport = async () => {
+    // Validate before hitting the API: missing or reversed ranges would
+    // either throw a cryptic parse error or silently return an empty report.
+    if (!startDate || !endDate) {
+      setError("Please pick both a start and an end date.");
+      return;
+    }
+    if (new Date(startDate) > new Date(endDate)) {
+      setError("Start date must be on or before the end date.");
+      return;
+    }
     setLoading(true);
     setError("");
     setReport(null);
@@ -54,7 +64,10 @@ export default function ReportsPage() {
           endInstant: new Date(endDate + "T23:59:59.999").toISOString(),
         }),
       });
-      if (!res.ok) throw new Error("Failed to generate report.");
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.message || "Failed to generate report.");
+      }
       const data = await res.json();
       setReport(data);
     } catch (err) {

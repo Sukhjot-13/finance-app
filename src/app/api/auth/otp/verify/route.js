@@ -1,4 +1,5 @@
 // src/app/api/auth/otp/verify/route.js
+import bcrypt from "bcryptjs";
 import User from "@/models/user.model";
 import { sendError, sendSuccess } from "@/lib/server-utils";
 import {
@@ -15,6 +16,11 @@ import dbConnect from "@/lib/mongodb";
 const LOCKOUT_MS = 15 * 60 * 1000;
 const MAX_ATTEMPTS = 5;
 const verifyAttempts = new Map();
+
+// bcrypt hash of a throwaway string. Compared against when no real OTP
+// exists so the endpoint's timing is identical either way.
+const DUMMY_HASH =
+  "$2b$10$k01Lo54J/UL7JlMkAOoXv.rmp/VE03sYCLi0rKBHa7.KQT.duddqa";
 
 function getAttemptState(email) {
   const now = Date.now();
@@ -94,6 +100,7 @@ export async function POST(req) {
     // One uniform failure message for "no pending OTP", "expired", and
     // "wrong code" — differences would let callers probe which emails exist.
     let failureMessage = null;
+    let compareTarget = user && user.otp ? user.otp : DUMMY_HASH;
 
     if (!user || !user.otp || !user.otpExpires) {
       failureMessage = "Invalid or expired code. Please request a new one.";
@@ -101,11 +108,12 @@ export async function POST(req) {
       failureMessage = "Invalid or expired code. Please request a new one.";
     }
 
-    if (!failureMessage) {
-      const isMatch = await user.compareOtp(String(otp));
-      if (!isMatch) {
-        failureMessage = "Invalid or expired code. Please request a new one.";
-      }
+    // Always run a bcrypt comparison — against a dummy hash when no real
+    // OTP exists — so response timing can't reveal which emails have a
+    // pending login code.
+    const isMatch = await bcrypt.compare(String(otp), compareTarget);
+    if (!failureMessage && !isMatch) {
+      failureMessage = "Invalid or expired code. Please request a new one.";
     }
 
     if (failureMessage) {

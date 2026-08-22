@@ -12,8 +12,8 @@ export async function GET(req) {
     return NextResponse.json({ message: "Unauthorized" }, { status: status || 401 });
   }
 
-  await dbConnect();
   try {
+    await dbConnect();
     const userData = await User.findById(user._id).select("-otp -refreshTokens -__v").lean();
     if (!userData) {
       return NextResponse.json({ message: "User not found" }, { status: 404 });
@@ -32,8 +32,8 @@ export async function PUT(req) {
         return NextResponse.json({ message: "Unauthorized" }, { status: status || 401 });
     }
 
-    await dbConnect();
     try {
+        await dbConnect();
         const body = await req.json();
         const accountName =
           typeof body.accountName === "string" ? body.accountName.trim() : undefined;
@@ -43,6 +43,15 @@ export async function PUT(req) {
         if (accountName !== undefined && accountName.length > 60) {
             return NextResponse.json(
               { message: "Account name must be 60 characters or fewer" },
+              { status: 400 }
+            );
+        }
+
+        // Validate currency explicitly so bad input is a 400, not a
+        // mongoose enum failure surfacing as an opaque 500.
+        if (currency !== undefined && ![null, "", "USD", "INR"].includes(currency)) {
+            return NextResponse.json(
+              { message: "Currency must be USD or INR" },
               { status: 400 }
             );
         }

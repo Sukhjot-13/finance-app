@@ -12,7 +12,15 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [checkingSession, setCheckingSession] = useState(true);
+  const [resendIn, setResendIn] = useState(0);
   const router = useRouter();
+
+  // Cooldown ticker for the resend button on step 2.
+  useEffect(() => {
+    if (resendIn <= 0) return undefined;
+    const timer = setInterval(() => setResendIn((s) => s - 1), 1000);
+    return () => clearInterval(timer);
+  }, [resendIn]);
 
   // Check if already logged in and redirect
   useEffect(() => {
@@ -49,8 +57,35 @@ export default function LoginPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email }),
       });
-      if (!res.ok) throw new Error("Failed to send OTP. Please try again.");
+      // Surface the server's specific message (rate limit, invalid email…)
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.message || "Failed to send OTP. Please try again.");
+      }
       setStep(2);
+      setResendIn(30);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResend = async () => {
+    if (resendIn > 0 || loading) return;
+    setLoading(true);
+    setError("");
+    try {
+      const res = await fetch("/api/auth/otp/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.message || "Failed to resend OTP. Please try again.");
+      }
+      setResendIn(30);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -141,6 +176,8 @@ export default function LoginPage() {
                   id="otp"
                   name="otp"
                   type="text"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
                   maxLength="6"
                   required
                   value={otp}
@@ -178,12 +215,21 @@ export default function LoginPage() {
               </button>
               <button
                 type="button"
+                onClick={handleResend}
+                disabled={resendIn > 0 || loading}
+                className="w-full text-sm text-center text-indigo-600 hover:text-indigo-500 disabled:text-slate-400 disabled:cursor-not-allowed"
+              >
+                {resendIn > 0 ? `Resend code in ${resendIn}s` : "Resend code"}
+              </button>
+              <button
+                type="button"
                 onClick={() => {
                   setStep(1);
                   setError("");
                   setOtp("");
+                  setResendIn(0);
                 }}
-                className="w-full text-sm text-center text-indigo-600 hover:text-indigo-500"
+                className="w-full text-sm text-center text-slate-500 hover:text-slate-700"
               >
                 Use a different email
               </button>

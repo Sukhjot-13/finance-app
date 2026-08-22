@@ -9,9 +9,9 @@ export async function GET(req) {
   if (!user)
     return NextResponse.json({ message: "Not authenticated" }, { status: status || 401 });
 
-  await dbConnect();
-
   try {
+    await dbConnect();
+
     const { searchParams } = new URL(req.url);
     const month = searchParams.get("month") || getCurrentMonth();
 
@@ -29,9 +29,8 @@ export async function POST(req) {
   if (!user)
     return NextResponse.json({ message: "Not authenticated" }, { status: status || 401 });
 
-  await dbConnect();
-
   try {
+    await dbConnect();
     const body = await req.json();
     const { category, amount, month } = body;
 
@@ -80,9 +79,8 @@ export async function DELETE(req) {
   if (!user)
     return NextResponse.json({ message: "Not authenticated" }, { status: status || 401 });
 
-  await dbConnect();
-
   try {
+    await dbConnect();
     const { searchParams } = new URL(req.url);
     const category = searchParams.get("category");
     const month = searchParams.get("month") || getCurrentMonth();
