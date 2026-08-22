@@ -332,7 +332,7 @@ export default function AddTransactionDrawer({
                       One-time expense
                     </span>
                     <span className="block text-xs text-slate-500">
-                      Don't count this in my monthly budget
+                      {"Don't count this in my monthly budget"}
                     </span>
                   </span>
                 </label>

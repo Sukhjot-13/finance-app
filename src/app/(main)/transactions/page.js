@@ -169,7 +169,7 @@ function EditTransactionModal({ transaction, onClose, onSave }) {
                     One-time expense
                   </span>
                   <span className="block text-xs text-gray-500">
-                    Don't count this in my monthly budget
+                    {"Don't count this in my monthly budget"}
                   </span>
                 </span>
               </label>
