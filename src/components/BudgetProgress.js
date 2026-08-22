@@ -9,7 +9,7 @@ import { UserContext } from "@/app/(main)/layout";
 export default function BudgetProgress() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const user = useContext(UserContext);
+  const { user } = useContext(UserContext);
 
   useEffect(() => {
     // Client-local month window + month key so the server compares against

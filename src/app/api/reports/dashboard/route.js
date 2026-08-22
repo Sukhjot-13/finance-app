@@ -7,9 +7,9 @@ import { NextResponse } from "next/server";
 
 export async function GET(req) {
   // Full session check so server-side revocation applies here too
-  const { user } = await verifySession();
+  const { user, status } = await verifySession();
   if (!user) {
-    return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ message: "Unauthorized" }, { status: status || 401 });
   }
 
   await dbConnect();

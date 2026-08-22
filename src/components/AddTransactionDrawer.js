@@ -69,17 +69,19 @@ export default function AddTransactionDrawer({
   };
 
   useEffect(() => {
-    // Fetch categories when the drawer is opened for the first time
+    // Fetch categories when the drawer is opened
     if (isOpen) {
       fetchCategories();
     }
   }, [isOpen]);
 
-  // Reset form when type changes
-  useEffect(() => {
+  // Type switch resets the selected category immediately (event-driven,
+  // no cascading-render effect needed).
+  const handleTypeChange = (value) => {
+    setType(value);
     setCategory("");
     setIsAddingNewCategory(false);
-  }, [type]);
+  };
 
   const handleCategoryChange = (e) => {
     const { value } = e.target;
@@ -213,7 +215,7 @@ export default function AddTransactionDrawer({
 
               <SegmentedControl
                 value={type}
-                onChange={setType}
+                onChange={handleTypeChange}
                 options={[
                   {
                     label: "Expense",

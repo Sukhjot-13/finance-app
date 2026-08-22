@@ -11,7 +11,6 @@ import {
 import mongoose from "mongoose";
 
 export async function POST() {
-  await dbConnect();
   const cookieStore = await cookies();
   const token = await cookieStore.get("refreshToken")?.value;
 
@@ -32,7 +31,10 @@ export async function POST() {
   }
 
   try {
-    // 2. Find the user and check if the token is valid in the database
+    // 2. Find the user and check if the token is valid in the database.
+    // (dbConnect is INSIDE the try: a DB outage must surface as a retryable
+    // 500, never as an unhandled throw that bypasses this handler.)
+    await dbConnect();
     const user = await User.findOne({
       _id: new mongoose.Types.ObjectId(decoded.userId),
       "refreshTokens.token": token,

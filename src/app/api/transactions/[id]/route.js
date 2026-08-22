@@ -8,8 +8,8 @@ import { sendError, sendSuccess } from "@/lib/server-utils";
  * GET a single transaction by its ID.
  */
 export async function GET(request, { params }) {
-  const { user, error } = await verifySession();
-  if (error || !user) return sendError(error || "Unauthorized", 401);
+  const { user, error, status: sessionStatus } = await verifySession();
+  if (error || !user) return sendError(error || "Unauthorized", sessionStatus || 401);
 
   const { id } = await params;
 
@@ -35,8 +35,8 @@ export async function GET(request, { params }) {
  * PUT (update) a transaction by its ID.
  */
 export async function PUT(request, { params }) {
-  const { user, error } = await verifySession();
-  if (error || !user) return sendError(error || "Unauthorized", 401);
+  const { user, error, status: sessionStatus } = await verifySession();
+  if (error || !user) return sendError(error || "Unauthorized", sessionStatus || 401);
 
   const { id } = await params;
 
@@ -80,8 +80,8 @@ export async function PUT(request, { params }) {
  * DELETE a transaction by its ID.
  */
 export async function DELETE(request, { params }) {
-  const { user, error } = await verifySession();
-  if (error || !user) return sendError(error || "Unauthorized", 401);
+  const { user, error, status: sessionStatus } = await verifySession();
+  if (error || !user) return sendError(error || "Unauthorized", sessionStatus || 401);
 
   const { id } = await params;
 

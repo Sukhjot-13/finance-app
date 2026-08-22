@@ -7,13 +7,13 @@ import { defaultExpenseCategories, defaultIncomeCategories } from "@/lib/constan
 
 // GET all categories for the user (defaults + custom)
 export async function GET(request) {
-  const { user } = await verifySession();
+  const { user, status } = await verifySession();
   if (!user)
-    return NextResponse.json({ message: "Not authenticated" }, { status: 401 });
-
-  await dbConnect();
+    return NextResponse.json({ message: "Not authenticated" }, { status: status || 401 });
 
   try {
+    await dbConnect();
+
     const userCategories = await Category.find({ userId: user._id });
     const expenseCategories = [
       ...new Set([
@@ -41,22 +41,29 @@ export async function GET(request) {
 
 // POST a new custom category
 export async function POST(request) {
-  const { user } = await verifySession();
+  const { user, status } = await verifySession();
   if (!user)
-    return NextResponse.json({ message: "Not authenticated" }, { status: 401 });
-
-  await dbConnect();
-  const { name, type } = await request.json();
-
-  if (!name || !type) {
-    return NextResponse.json(
-      { message: "Category name and type are required" },
-      { status: 400 }
-    );
-  }
+    return NextResponse.json({ message: "Not authenticated" }, { status: status || 401 });
 
   try {
-    const newCategory = new Category({ name, type, userId: user._id });
+    await dbConnect();
+    const { name, type } = await request.json();
+
+    if (!name || typeof name !== "string" || !name.trim() || !type) {
+      return NextResponse.json(
+        { message: "Category name and type are required" },
+        { status: 400 }
+      );
+    }
+
+    if (name.trim().length > 50) {
+      return NextResponse.json(
+        { message: "Category name cannot exceed 50 characters" },
+        { status: 400 }
+      );
+    }
+
+    const newCategory = new Category({ name: name.trim(), type, userId: user._id });
     await newCategory.save();
     return NextResponse.json(newCategory, { status: 201 });
   } catch (error) {
@@ -66,6 +73,7 @@ export async function POST(request) {
         { status: 409 }
       );
     }
+    console.error("Create category error:", error.message);
     return NextResponse.json(
       { message: "Error creating category" },
       { status: 400 }

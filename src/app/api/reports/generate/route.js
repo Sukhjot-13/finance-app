@@ -5,7 +5,7 @@ import Transaction from "@/models/transaction.model";
 import { verifySession } from "@/lib/auth";
 
 export async function POST(request) {
-  const { user } = await verifySession();
+  const { user, status } = await verifySession();
   if (!user)
     return NextResponse.json({ message: "Not authenticated" }, { status: 401 });
 

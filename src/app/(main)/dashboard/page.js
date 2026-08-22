@@ -48,19 +48,20 @@ export default function DashboardPage() {
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [isBudgetOpen, setIsBudgetOpen] = useState(false);
   const [budgetVersion, setBudgetVersion] = useState(0);
-  const user = useContext(UserContext); // Get user data from context
+  const { user } = useContext(UserContext); // Get user data from context
+
+  // Client-local month window shared by the mount fetch and refetches.
+  const now = new Date();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1);
 
   const fetchData = async () => {
-    setLoading(true);
     try {
       // Send the client's local month start AND end so the server window
       // matches the user's calendar regardless of where the server runs,
       // and future-dated transactions stay out of this month.
-      const now = new Date();
-      const start = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
-      const end = new Date(now.getFullYear(), now.getMonth() + 1, 1).toISOString();
       const res = await api(
-        `/api/reports/dashboard?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`
+        `/api/reports/dashboard?start=${encodeURIComponent(monthStart.toISOString())}&end=${encodeURIComponent(monthEnd.toISOString())}`
       );
       if (!res.ok) throw new Error("Failed to fetch dashboard data");
       const result = await res.json();
@@ -73,8 +74,38 @@ export default function DashboardPage() {
     }
   };
 
-  useEffect(() => {
+  // Event-triggered refetch (e.g. after adding a transaction): re-show the
+  // skeleton first, then load. Kept out of fetchData so the mount effect
+  // stays free of synchronous setState.
+  const refreshWithSkeleton = () => {
+    setLoading(true);
+    setData(null);
     fetchData();
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    api(
+      `/api/reports/dashboard?start=${encodeURIComponent(monthStart.toISOString())}&end=${encodeURIComponent(monthEnd.toISOString())}`
+    )
+      .then((res) => {
+        if (!res.ok) throw new Error("Failed to fetch dashboard data");
+        return res.json();
+      })
+      .then((result) => {
+        if (!cancelled) setData(result);
+      })
+      .catch((error) => {
+        console.error(error);
+        if (!cancelled) setData(null);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   if (loading) {
@@ -123,7 +154,12 @@ export default function DashboardPage() {
       <AddTransactionDrawer
         isOpen={isDrawerOpen}
         onClose={() => setIsDrawerOpen(false)}
-        onTransactionAdded={fetchData}
+        onTransactionAdded={() => {
+          // Refresh stats AND bump the budget section so newly added
+          // expenses are reflected in the budget bars immediately.
+          refreshWithSkeleton();
+          setBudgetVersion((v) => v + 1);
+        }}
       />
       <div className="space-y-6 sm:space-y-8 pb-20 sm:pb-8">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">

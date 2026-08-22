@@ -1,34 +1,43 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useEffect, useContext } from "react";
 import { Save, LogOut, AlertTriangle } from "lucide-react";
 import api from "@/lib/api";
+import { UserContext } from "@/app/(main)/layout";
 
 export default function ProfilePage() {
-  const [user, setUser] = useState(null);
+  // Shared context: updating via setUser propagates currency/name app-wide.
+  const { user: contextUser, setUser } = useContext(UserContext);
   const [accountName, setAccountName] = useState("");
   const [currency, setCurrency] = useState("USD");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState(null); // { type: 'success' | 'error', text }
   const [confirmLogoutAll, setConfirmLogoutAll] = useState(false);
-  const router = useRouter();
 
   useEffect(() => {
+    // Refresh from the server so this page reflects other-tab changes;
+    // definitive auth failures are handled inside api() itself.
+    let cancelled = false;
     api("/api/user")
       .then((res) => {
         if (!res.ok) throw new Error("Failed to fetch user data");
         return res.json();
       })
       .then((data) => {
+        if (cancelled) return;
         setUser(data);
         setAccountName(data.accountName || "");
         setCurrency(data.currency || "USD");
         setLoading(false);
       })
-      .catch(() => router.push("/login"));
-  }, [router]);
+      .catch(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [setUser]);
 
   const handleSave = async (e) => {
     e.preventDefault();
@@ -50,6 +59,9 @@ export default function ProfilePage() {
         }
         throw new Error(message);
       }
+      // Propagate to every page sharing UserContext (header name,
+      // currency formatting) without a reload.
+      setUser((prev) => ({ ...prev, accountName, currency }));
       setStatus({ type: "success", text: "Profile saved successfully." });
     } catch (error) {
       console.error(error);
@@ -70,7 +82,9 @@ export default function ProfilePage() {
     setConfirmLogoutAll(false);
     try {
       await api("/api/auth/logout-all", { method: "POST" });
-      router.push("/login");
+      // Cookies are cleared server-side; a hard navigation guarantees a
+      // clean slate even if client state was mid-flight.
+      window.location.href = "/login";
     } catch (error) {
       console.error("Failed to log out from all devices", error);
       setStatus({
@@ -145,7 +159,7 @@ export default function ProfilePage() {
             <input
               id="email"
               type="email"
-              value={user?.email || ""}
+              value={contextUser?.email || ""}
               disabled
               className="mt-1 block w-full px-3 py-2 border border-slate-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 bg-slate-50 text-slate-500"
             />

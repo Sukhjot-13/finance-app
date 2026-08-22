@@ -5,9 +5,9 @@ import { verifySession } from "@/lib/auth";
 
 // GET all budgets for the current month
 export async function GET(req) {
-  const { user } = await verifySession();
+  const { user, status } = await verifySession();
   if (!user)
-    return NextResponse.json({ message: "Not authenticated" }, { status: 401 });
+    return NextResponse.json({ message: "Not authenticated" }, { status: status || 401 });
 
   await dbConnect();
 
@@ -25,9 +25,9 @@ export async function GET(req) {
 
 // POST create or update a budget
 export async function POST(req) {
-  const { user } = await verifySession();
+  const { user, status } = await verifySession();
   if (!user)
-    return NextResponse.json({ message: "Not authenticated" }, { status: 401 });
+    return NextResponse.json({ message: "Not authenticated" }, { status: status || 401 });
 
   await dbConnect();
 
@@ -76,9 +76,9 @@ export async function POST(req) {
 
 // DELETE a budget
 export async function DELETE(req) {
-  const { user } = await verifySession();
+  const { user, status } = await verifySession();
   if (!user)
-    return NextResponse.json({ message: "Not authenticated" }, { status: 401 });
+    return NextResponse.json({ message: "Not authenticated" }, { status: status || 401 });
 
   await dbConnect();
 

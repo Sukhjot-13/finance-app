@@ -1,19 +1,23 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Plus, Trash2 } from "lucide-react";
+import { Plus, Trash2, Pencil } from "lucide-react";
 import api from "@/lib/api";
 import { defaultExpenseCategories, defaultIncomeCategories } from "@/lib/constants";
 
 export default function CategoriesPage() {
   const [categories, setCategories] = useState({ expense: [], income: [], allCustom: [] });
   const [loading, setLoading] = useState(true);
+  const [fetchFailed, setFetchFailed] = useState(false);
   const [filter, setFilter] = useState("all");
   const [showAddForm, setShowAddForm] = useState(false);
   const [newName, setNewName] = useState("");
   const [newType, setNewType] = useState("expense");
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
+  const [renamingId, setRenamingId] = useState(null);
+  const [renameValue, setRenameValue] = useState("");
+  const [savingRename, setSavingRename] = useState(false);
   const [error, setError] = useState("");
 
   const fetchCategories = async () => {
@@ -22,15 +26,37 @@ export default function CategoriesPage() {
       if (!res.ok) throw new Error("Failed to fetch categories");
       const data = await res.json();
       setCategories(data);
+      setFetchFailed(false);
     } catch (error) {
       console.error("Failed to fetch categories:", error);
+      setFetchFailed(true);
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchCategories();
+    let cancelled = false;
+    api("/api/categories")
+      .then((res) => {
+        if (!res.ok) throw new Error("Failed to fetch categories");
+        return res.json();
+      })
+      .then((data) => {
+        if (cancelled) return;
+        setCategories(data);
+        setFetchFailed(false);
+      })
+      .catch((error) => {
+        console.error("Failed to fetch categories:", error);
+        if (!cancelled) setFetchFailed(true);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // Only show custom categories (no built-in defaults)
@@ -63,6 +89,42 @@ export default function CategoriesPage() {
     } catch (error) {
       setError("Failed to delete category");
       setDeletingId(null);
+    }
+  };
+
+  const handleRenameStart = (item) => {
+    setRenamingId(item._id);
+    setRenameValue(item.name);
+    setError("");
+  };
+
+  const handleRenameCancel = () => {
+    setRenamingId(null);
+    setRenameValue("");
+  };
+
+  const handleRenameSubmit = async (_id) => {
+    if (!renameValue.trim()) return;
+    setSavingRename(true);
+    try {
+      const res = await api(`/api/categories/${_id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: renameValue.trim() }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setError(data.message || "Failed to rename category");
+        return;
+      }
+      setRenamingId(null);
+      setRenameValue("");
+      setError("");
+      fetchCategories();
+    } catch {
+      setError("Failed to rename category");
+    } finally {
+      setSavingRename(false);
     }
   };
 
@@ -132,6 +194,7 @@ export default function CategoriesPage() {
               onChange={(e) => setNewName(e.target.value)}
               className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
               placeholder="Category name"
+              maxLength={50}
               autoFocus
               required
             />
@@ -176,6 +239,21 @@ export default function CategoriesPage() {
         </div>
       )}
 
+      {/* Fetch failure banner (distinct from the empty state) */}
+      {fetchFailed && !loading && (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-3 flex items-center justify-between">
+          <p className="text-sm text-red-700">
+            Couldn&apos;t load your categories. Please try again.
+          </p>
+          <button
+            onClick={fetchCategories}
+            className="text-red-600 hover:text-red-800 underline text-xs"
+          >
+            Retry
+          </button>
+        </div>
+      )}
+
       {/* Filter tabs */}
       <div className="flex gap-2">
         {["all", "expense", "income"].map((tab) => (
@@ -195,7 +273,7 @@ export default function CategoriesPage() {
 
       {/* Categories list */}
       <div className="bg-white rounded-lg shadow-sm border border-slate-200 divide-y divide-slate-100">
-        {displayItems.length === 0 && (
+        {displayItems.length === 0 && !fetchFailed && (
           <p className="text-center text-slate-400 py-10">
             {filter === "all"
               ? "No custom categories yet. Click \"Add Category\" to create one."
@@ -204,20 +282,50 @@ export default function CategoriesPage() {
         )}
         {displayItems.map((item) => (
           <div key={item._id} className="flex items-center justify-between p-4">
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3 flex-1 min-w-0">
               <span
-                className={`w-2 h-2 rounded-full ${
+                className={`w-2 h-2 rounded-full shrink-0 ${
                   item.type === "expense" ? "bg-red-400" : "bg-green-400"
                 }`}
               />
-              <div>
-                <span className="font-medium text-slate-700 capitalize">{item.name}</span>
-                {isDefaultCategory(item.name, item.type) && (
-                  <span className="ml-2 text-xs text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
-                    Matches default
-                  </span>
-                )}
-              </div>
+              {renamingId === item._id ? (
+                <div className="flex items-center gap-2 w-full">
+                  <input
+                    type="text"
+                    value={renameValue}
+                    onChange={(e) => setRenameValue(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") handleRenameSubmit(item._id);
+                      if (e.key === "Escape") handleRenameCancel();
+                    }}
+                    maxLength={50}
+                    autoFocus
+                    className="w-full max-w-xs px-3 py-1.5 border border-indigo-300 rounded-md text-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                  />
+                  <button
+                    onClick={() => handleRenameSubmit(item._id)}
+                    disabled={savingRename || !renameValue.trim()}
+                    className="px-3 py-1.5 text-xs font-medium bg-indigo-600 text-white rounded-md hover:bg-indigo-700 disabled:bg-indigo-300"
+                  >
+                    {savingRename ? "Saving..." : "Save"}
+                  </button>
+                  <button
+                    onClick={handleRenameCancel}
+                    className="px-2 py-1.5 text-xs text-slate-500 hover:text-slate-700"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              ) : (
+                <div>
+                  <span className="font-medium text-slate-700 capitalize">{item.name}</span>
+                  {isDefaultCategory(item.name, item.type) && (
+                    <span className="ml-2 text-xs text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
+                      Matches default
+                    </span>
+                  )}
+                </div>
+              )}
             </div>
 
             <div className="flex items-center gap-2">
@@ -237,14 +345,23 @@ export default function CategoriesPage() {
                     Cancel
                   </button>
                 </div>
-              ) : (
-                <button
-                  onClick={() => setDeletingId(item._id)}
-                  className="p-1.5 text-slate-400 hover:text-red-600 rounded-md hover:bg-slate-100"
-                  title="Delete"
-                >
-                  <Trash2 size={15} />
-                </button>
+              ) : renamingId === item._id ? null : (
+                <>
+                  <button
+                    onClick={() => handleRenameStart(item)}
+                    className="p-1.5 text-slate-400 hover:text-indigo-600 rounded-md hover:bg-slate-100"
+                    title="Rename"
+                  >
+                    <Pencil size={15} />
+                  </button>
+                  <button
+                    onClick={() => setDeletingId(item._id)}
+                    className="p-1.5 text-slate-400 hover:text-red-600 rounded-md hover:bg-slate-100"
+                    title="Delete"
+                  >
+                    <Trash2 size={15} />
+                  </button>
+                </>
               )}
             </div>
           </div>

@@ -63,6 +63,10 @@ export const verifyAuth = async () => {
 /**
  * A secure verifier for API Routes (Node.js runtime).
  * It checks the access token AND verifies the refresh token exists in the database.
+ *
+ * Returns { user } on success, or { user: null, error, status } where status
+ * distinguishes definitive auth failures (401) from infrastructure trouble
+ * (503) — so callers never turn a transient DB outage into a forced logout.
  */
 export const verifySession = async () => {
   const User = (await import("@/models/user.model")).default;
@@ -73,17 +77,22 @@ export const verifySession = async () => {
   const refreshToken = cookieStore.get("refreshToken")?.value;
 
   if (!accessToken || !refreshToken) {
-    return { user: null, error: "Missing tokens" };
+    return { user: null, error: "Missing tokens", status: 401 };
+  }
+
+  // Signature/expiry problems are definitive auth failures.
+  let decoded;
+  try {
+    decoded = jwt.verify(accessToken, ACCESS_TOKEN_SECRET);
+  } catch {
+    return { user: null, error: "Invalid or expired access token", status: 401 };
   }
 
   try {
-    const decoded = jwt.verify(accessToken, ACCESS_TOKEN_SECRET);
-    const userId = decoded.userId;
-
     await dbConnect();
 
     const userFromDb = await User.findOne({
-      _id: userId,
+      _id: decoded.userId,
       "refreshTokens.token": refreshToken,
     });
 
@@ -91,12 +100,15 @@ export const verifySession = async () => {
       return {
         user: null,
         error: "Session invalid. Refresh token not found in DB.",
+        status: 401,
       };
     }
 
-    return { user: { _id: userId } };
+    return { user: { _id: decoded.userId } };
   } catch (error) {
-    return { user: null, error: error.message };
+    // DB unreachable / timed out etc. — retryable, not an auth failure.
+    console.error("verifySession transient error:", error.message);
+    return { user: null, error: "Service temporarily unavailable", status: 503 };
   }
 };
 

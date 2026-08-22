@@ -1,7 +1,7 @@
 // src/app/(main)/transactions/page.js
 "use client";
 
-import { useState, useEffect, useCallback, useContext } from "react";
+import { useState, useEffect, useMemo, useContext } from "react";
 import { formatCurrency, formatDate, formatDateForInput } from "@/lib/utils";
 import api from "@/lib/api";
 import { Trash2, Edit, X, ChevronDown } from "lucide-react";
@@ -13,21 +13,17 @@ function EditTransactionModal({ transaction, onClose, onSave }) {
   // Normalize the stored date to "YYYY-MM-DD" (local timezone) so the date
   // input shows exactly the date the user sees in the list. Dates are stored
   // as instants, so they must be converted with the viewer's local getters.
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState(() => ({
     ...transaction,
     date: formatDateForInput(new Date(transaction.date)),
-  });
+  }));
   const [categories, setCategories] = useState({ expense: [], income: [] });
   const [newCategory, setNewCategory] = useState("");
   const [isAddingNewCategory, setIsAddingNewCategory] = useState(false);
   const [modalError, setModalError] = useState("");
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    setFormData({
-      ...transaction,
-      date: formatDateForInput(new Date(transaction.date)),
-    });
-    setModalError("");
     const fetchCategories = async () => {
       try {
         const res = await api("/api/categories");
@@ -68,10 +64,15 @@ function EditTransactionModal({ transaction, onClose, onSave }) {
         const res = await api("/api/categories", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name: newCategory, type: formData.type }),
+          body: JSON.stringify({ name: newCategory.trim(), type: formData.type }),
         });
-        if (!res.ok) throw new Error("Failed to create category.");
-        finalCategory = newCategory;
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.message || "Failed to create category.");
+        }
+        finalCategory = newCategory.trim();
+        setIsAddingNewCategory(false);
+        setCategoryAfterSave(finalCategory);
       } catch (err) {
         setModalError(err.message);
         return;
@@ -80,14 +81,27 @@ function EditTransactionModal({ transaction, onClose, onSave }) {
     // Send the date as an instant at 12:00 noon in the user's local timezone,
     // matching AddTransactionDrawer (see the comment there). Send only the
     // editable fields — never echo _id/userId/timestamps back to the server.
-    await onSave({
-      type: formData.type,
-      amount: formData.amount,
-      category: finalCategory,
-      date: new Date(formData.date + "T12:00:00"),
-      description: formData.description,
-      excludeFromBudget: !!formData.excludeFromBudget,
-    });
+    setSaving(true);
+    try {
+      const result = await onSave({
+        type: formData.type,
+        amount: formData.amount,
+        category: finalCategory,
+        date: new Date(formData.date + "T12:00:00"),
+        description: formData.description,
+        excludeFromBudget: !!formData.excludeFromBudget,
+      });
+      // Parent keeps the modal open on failure and reports back here.
+      if (result && !result.ok) {
+        setModalError(result.message || "Failed to update transaction.");
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const setCategoryAfterSave = (value) => {
+    setFormData((prev) => ({ ...prev, category: value }));
   };
 
   const currentCategories = formData.type === 'expense' ? categories.expense : categories.income;
@@ -220,8 +234,12 @@ function EditTransactionModal({ transaction, onClose, onSave }) {
             <button type="button" onClick={onClose} className="px-4 py-2 text-sm rounded-md text-slate-600 hover:bg-slate-100">
               Cancel
             </button>
-            <button type="submit" className="bg-indigo-600 text-white px-4 py-2 rounded-md text-sm font-medium hover:bg-indigo-700">
-              Save Changes
+            <button
+              type="submit"
+              disabled={saving}
+              className="bg-indigo-600 text-white px-4 py-2 rounded-md text-sm font-medium hover:bg-indigo-700 disabled:bg-indigo-400"
+            >
+              {saving ? "Saving..." : "Save Changes"}
             </button>
           </div>
         </form>
@@ -311,7 +329,6 @@ function TransactionCard({ transaction, userCurrency, onEdit, onDelete }) {
 // Main Page Component
 export default function TransactionsPage() {
   const [transactions, setTransactions] = useState([]);
-  const [filteredTransactions, setFilteredTransactions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [editingTransaction, setEditingTransaction] = useState(null);
   const [error, setError] = useState("");
@@ -323,11 +340,13 @@ export default function TransactionsPage() {
     startDate: "",
     endDate: "",
   });
-  const user = useContext(UserContext);
+  const { user } = useContext(UserContext);
 
   const categories = [...new Set(transactions.map((t) => t.category))].sort();
 
-  useEffect(() => {
+  // Derive the visible list during render instead of mirroring it in state
+  // with an effect (avoids cascading renders entirely).
+  const filteredTransactions = useMemo(() => {
     let result = [...transactions];
 
     if (filters.search) {
@@ -357,11 +376,10 @@ export default function TransactionsPage() {
       result = result.filter((t) => new Date(t.date) <= end);
     }
 
-    setFilteredTransactions(result);
+    return result;
   }, [transactions, filters]);
 
-  const fetchTransactions = useCallback(async () => {
-    setLoading(true);
+  const fetchTransactions = async () => {
     try {
       const res = await api("/api/transactions");
       if (!res.ok) throw new Error("Failed to fetch");
@@ -374,19 +392,48 @@ export default function TransactionsPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  };
+
+  // Event-triggered refetch (delete/edit): re-show skeletons first. Kept
+  // separate from fetchTransactions so the mount effect has no synchronous
+  // setState.
+  const refetchWithSkeleton = () => {
+    setLoading(true);
+    fetchTransactions();
+  };
 
   useEffect(() => {
-    fetchTransactions();
-  }, [fetchTransactions]);
+    let cancelled = false;
+    api("/api/transactions")
+      .then((res) => {
+        if (!res.ok) throw new Error("Failed to fetch");
+        return res.json();
+      })
+      .then((data) => {
+        if (cancelled) return;
+        setTransactions(data);
+        setError("");
+      })
+      .catch((err) => {
+        console.error("Error fetching transactions:", err);
+        if (!cancelled) setError("Failed to load transactions.");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const handleDelete = async (id) => {
     setDeletingId(id);
     try {
-      await api(`/api/transactions/${id}`, { method: "DELETE" });
+      const res = await api(`/api/transactions/${id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error("Delete failed");
       setDeletingId(null);
       setError("");
-      fetchTransactions();
+      refetchWithSkeleton();
     } catch (err) {
       console.error("Error deleting transaction:", err);
       setError("Failed to delete transaction.");
@@ -401,13 +448,25 @@ export default function TransactionsPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(updatedFields),
       });
-      if (!res.ok) throw new Error("Failed to update");
+      if (!res.ok) {
+        let message = "Failed to update transaction.";
+        try {
+          const data = await res.json();
+          if (data?.message) message = data.message;
+        } catch {
+          // non-JSON error body
+        }
+        throw new Error(message);
+      }
       setEditingTransaction(null);
       setError("");
-      fetchTransactions();
+      refetchWithSkeleton();
+      return { ok: true };
     } catch (err) {
       console.error("Error updating transaction:", err);
-      setError("Failed to update transaction.");
+      // Return the failure so the open edit modal can show it inline —
+      // a page-level banner would be hidden behind the modal overlay.
+      return { ok: false, message: err.message || "Failed to update transaction." };
     }
   };
 

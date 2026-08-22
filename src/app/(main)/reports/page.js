@@ -35,7 +35,7 @@ export default function ReportsPage() {
   const [report, setReport] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const user = useContext(UserContext); // Get user from context
+  const { user } = useContext(UserContext); // Get user from context
 
   const generateReport = async () => {
     setLoading(true);

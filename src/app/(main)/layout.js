@@ -19,7 +19,10 @@ import {
 import { AnimatePresence, motion } from "framer-motion";
 import api from "@/lib/api";
 
-// Export the context so other components can use it
+// Export the context so other components can use it.
+// Shape: { user, setUser } — setUser lets pages (e.g. profile) update the
+// shared user immediately so currency/name changes propagate app-wide
+// without a full reload.
 export const UserContext = createContext(null);
 
 function Sidebar({ isOpen, onClose }) {
@@ -97,7 +100,7 @@ function Sidebar({ isOpen, onClose }) {
 
 function ProfileDropdown() {
   const [isOpen, setIsOpen] = useState(false);
-  const user = useContext(UserContext);
+  const { user } = useContext(UserContext);
   const router = useRouter();
 
   const handleLogout = async () => {
@@ -158,15 +161,22 @@ export default function MainLayout({ children }) {
   const [user, setUser] = useState(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const router = useRouter();
   const pathname = usePathname();
 
   useEffect(() => {
-    const checkScreenSize = () => {
-      setIsSidebarOpen(window.innerWidth >= 1024);
+    // Only react to crossing the desktop/mobile boundary; resizing within
+    // the same mode must not reopen a sidebar the user manually closed.
+    let wasDesktop = window.innerWidth >= 1024;
+    const onResize = () => {
+      const isDesktop = window.innerWidth >= 1024;
+      if (isDesktop !== wasDesktop) {
+        setIsSidebarOpen(isDesktop);
+        wasDesktop = isDesktop;
+      }
     };
-    checkScreenSize();
-    window.addEventListener("resize", checkScreenSize);
+    window.addEventListener("resize", onResize);
 
     const fetchUser = async () => {
       try {
@@ -176,25 +186,32 @@ export default function MainLayout({ children }) {
         }
         const data = await res.json();
         setUser(data);
-        // Only set loading to false after successfully fetching the user
         setLoading(false);
       } catch (error) {
         console.error("Failed to fetch user:", error);
-        // If there's an error, redirect to login. The component will unmount.
-        router.push("/login");
+        // api() has already redirected to /login for definitive auth
+        // failures — anything reaching here is transient. Show a retry
+        // state instead of bouncing the user around.
+        setLoading(false);
+        setLoadError(true);
       }
     };
 
     fetchUser();
 
-    return () => window.removeEventListener("resize", checkScreenSize);
+    return () => window.removeEventListener("resize", onResize);
   }, [router]);
 
-  useEffect(() => {
-    if (window.innerWidth < 1024) {
+  // Close the mobile sidebar when the route changes. Done as a render-time
+  // adjustment (React's recommended pattern for "respond to prop change")
+  // instead of a setState-in-effect, which causes cascading renders.
+  const [prevPathname, setPrevPathname] = useState(pathname);
+  if (prevPathname !== pathname) {
+    setPrevPathname(pathname);
+    if (typeof window !== "undefined" && window.innerWidth < 1024) {
       setIsSidebarOpen(false);
     }
-  }, [pathname]);
+  }
 
   const getPageTitle = () => {
     if (pathname.includes("/dashboard")) return "Dashboard";
@@ -213,8 +230,29 @@ export default function MainLayout({ children }) {
     );
   }
 
+  if (loadError) {
+    return (
+      <div className="flex items-center justify-center h-screen bg-slate-50 p-6">
+        <div className="text-center bg-white p-8 rounded-xl shadow-md max-w-md">
+          <h2 className="text-xl font-bold text-slate-800 mb-2">
+            Couldn&apos;t load your account
+          </h2>
+          <p className="text-sm text-slate-600 mb-4">
+            Something went wrong on our end. Your session is still safe.
+          </p>
+          <button
+            onClick={() => window.location.reload()}
+            className="px-4 py-2 bg-indigo-600 text-white rounded-md text-sm font-medium hover:bg-indigo-700"
+          >
+            Try again
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <UserContext.Provider value={user}>
+    <UserContext.Provider value={{ user, setUser }}>
       <div className="flex h-screen bg-slate-50 overflow-hidden">
         <Sidebar isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
         <main className="flex-1 flex flex-col overflow-hidden">

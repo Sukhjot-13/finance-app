@@ -11,6 +11,9 @@ const CategorySchema = new mongoose.Schema({
     type: String,
     required: true,
     trim: true,
+    // Matches Transaction.category's cap so any custom category can always
+    // be assigned to transactions.
+    maxlength: [50, "Category name cannot exceed 50 characters"],
   },
   type: {
     // To distinguish between income and expense categories if needed

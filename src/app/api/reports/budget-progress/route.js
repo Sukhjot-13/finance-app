@@ -8,9 +8,9 @@ import { NextResponse } from "next/server";
 const OVERALL_CATEGORY = "__total__";
 
 export async function GET(req) {
-  const { user } = await verifySession();
+  const { user, status } = await verifySession();
   if (!user) {
-    return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ message: "Unauthorized" }, { status: status || 401 });
   }
 
   await dbConnect();

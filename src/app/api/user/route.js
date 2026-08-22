@@ -7,9 +7,9 @@ import { NextResponse } from "next/server";
 // GET user details
 export async function GET(req) {
   // Full session check (access token + refresh token in DB)
-  const { user } = await verifySession();
+  const { user, status } = await verifySession();
   if (!user) {
-    return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ message: "Unauthorized" }, { status: status || 401 });
   }
 
   await dbConnect();
@@ -27,9 +27,9 @@ export async function GET(req) {
 
 // UPDATE user details
 export async function PUT(req) {
-    const { user } = await verifySession();
+    const { user, status } = await verifySession();
     if (!user) {
-        return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+        return NextResponse.json({ message: "Unauthorized" }, { status: status || 401 });
     }
 
     await dbConnect();
