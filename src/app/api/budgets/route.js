@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
 import dbConnect from "@/lib/mongodb";
 import Budget from "@/models/budget.model";
-import { verifyAuth } from "@/lib/auth";
+import { verifySession } from "@/lib/auth";
 
 // GET all budgets for the current month
 export async function GET(req) {
-  const { user } = await verifyAuth();
+  const { user } = await verifySession();
   if (!user)
     return NextResponse.json({ message: "Not authenticated" }, { status: 401 });
 
@@ -25,7 +25,7 @@ export async function GET(req) {
 
 // POST create or update a budget
 export async function POST(req) {
-  const { user } = await verifyAuth();
+  const { user } = await verifySession();
   if (!user)
     return NextResponse.json({ message: "Not authenticated" }, { status: 401 });
 
@@ -68,7 +68,7 @@ export async function POST(req) {
     }
 
     return NextResponse.json(
-      { message: "Error saving budget", error: error.message },
+      { message: "Error saving budget" },
       { status: 400 }
     );
   }
@@ -76,7 +76,7 @@ export async function POST(req) {
 
 // DELETE a budget
 export async function DELETE(req) {
-  const { user } = await verifyAuth();
+  const { user } = await verifySession();
   if (!user)
     return NextResponse.json({ message: "Not authenticated" }, { status: 401 });
 

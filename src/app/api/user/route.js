@@ -6,10 +6,10 @@ import { NextResponse } from "next/server";
 
 // GET user details
 export async function GET(req) {
-  // Use the new, more secure session verification
-  const { user, error } = await verifySession(); 
-  if (error || !user) {
-    return NextResponse.json({ message: "Unauthorized", error: error }, { status: 401 });
+  // Full session check (access token + refresh token in DB)
+  const { user } = await verifySession();
+  if (!user) {
+    return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
   }
 
   await dbConnect();
@@ -20,21 +20,32 @@ export async function GET(req) {
     }
     return NextResponse.json(userData, { status: 200 });
   } catch (dbError) {
-    return NextResponse.json({ message: "Server error", error: dbError.message }, { status: 500 });
+    console.error("GET /api/user error:", dbError.message);
+    return NextResponse.json({ message: "Server error" }, { status: 500 });
   }
 }
 
 // UPDATE user details
 export async function PUT(req) {
-    const { user, error } = await verifySession();
-    if (error || !user) {
-        return NextResponse.json({ message: "Unauthorized", error: error }, { status: 401 });
+    const { user } = await verifySession();
+    if (!user) {
+        return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
 
     await dbConnect();
     try {
         const body = await req.json();
-        const { accountName, currency } = body;
+        const accountName =
+          typeof body.accountName === "string" ? body.accountName.trim() : undefined;
+        const currency = body.currency;
+
+        // Cap account name length; schema has no maxlength of its own
+        if (accountName !== undefined && accountName.length > 60) {
+            return NextResponse.json(
+              { message: "Account name must be 60 characters or fewer" },
+              { status: 400 }
+            );
+        }
 
         const fieldsToUpdate = {};
         if (accountName) fieldsToUpdate.accountName = accountName;
@@ -56,6 +67,7 @@ export async function PUT(req) {
 
         return NextResponse.json(updatedUser, { status: 200 });
     } catch (dbError) {
-        return NextResponse.json({ message: "Server error", error: dbError.message }, { status: 500 });
+        console.error("PUT /api/user error:", dbError.message);
+        return NextResponse.json({ message: "Server error" }, { status: 500 });
     }
 }

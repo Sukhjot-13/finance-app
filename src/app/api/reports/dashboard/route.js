@@ -1,13 +1,13 @@
 // FILE: finance-app/src/app/api/reports/dashboard/route.js
 import dbConnect from "@/lib/mongodb";
 import Transaction from "@/models/transaction.model";
-import { verifyAuth } from "@/lib/auth";
+import { verifySession } from "@/lib/auth";
 import mongoose from "mongoose";
 import { NextResponse } from "next/server";
 
 export async function GET(req) {
-  // Use the correct verifyAuth function
-  const { user } = await verifyAuth();
+  // Full session check so server-side revocation applies here too
+  const { user } = await verifySession();
   if (!user) {
     return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
   }

@@ -2,10 +2,10 @@
 import { NextResponse } from "next/server";
 import dbConnect from "@/lib/mongodb";
 import Transaction from "@/models/transaction.model";
-import { verifyAuth } from "@/lib/auth";
+import { verifySession } from "@/lib/auth";
 
 export async function POST(request) {
-  const { user } = await verifyAuth();
+  const { user } = await verifySession();
   if (!user)
     return NextResponse.json({ message: "Not authenticated" }, { status: 401 });
 

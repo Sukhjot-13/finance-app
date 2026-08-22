@@ -2,12 +2,12 @@
 import { NextResponse } from "next/server";
 import dbConnect from "@/lib/mongodb";
 import Category from "@/models/category.model";
-import { verifyAuth } from "@/lib/auth";
+import { verifySession } from "@/lib/auth";
 import { defaultExpenseCategories, defaultIncomeCategories } from "@/lib/constants";
 
 // GET all categories for the user (defaults + custom)
 export async function GET(request) {
-  const { user } = await verifyAuth();
+  const { user } = await verifySession();
   if (!user)
     return NextResponse.json({ message: "Not authenticated" }, { status: 401 });
 
@@ -41,7 +41,7 @@ export async function GET(request) {
 
 // POST a new custom category
 export async function POST(request) {
-  const { user } = await verifyAuth();
+  const { user } = await verifySession();
   if (!user)
     return NextResponse.json({ message: "Not authenticated" }, { status: 401 });
 
@@ -67,7 +67,7 @@ export async function POST(request) {
       );
     }
     return NextResponse.json(
-      { message: "Error creating category", error: error.message },
+      { message: "Error creating category" },
       { status: 400 }
     );
   }

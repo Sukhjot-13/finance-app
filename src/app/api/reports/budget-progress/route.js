@@ -1,14 +1,14 @@
 import dbConnect from "@/lib/mongodb";
 import Transaction from "@/models/transaction.model";
 import Budget from "@/models/budget.model";
-import { verifyAuth } from "@/lib/auth";
+import { verifySession } from "@/lib/auth";
 import mongoose from "mongoose";
 import { NextResponse } from "next/server";
 
 const OVERALL_CATEGORY = "__total__";
 
 export async function GET(req) {
-  const { user } = await verifyAuth();
+  const { user } = await verifySession();
   if (!user) {
     return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
   }

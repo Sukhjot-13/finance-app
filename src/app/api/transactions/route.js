@@ -1,14 +1,14 @@
 // FILE: finance-app/src/app/api/transactions/route.js
 import dbConnect from "@/lib/mongodb";
 import Transaction from "@/models/transaction.model";
-import { verifyAuth } from "@/lib/auth";
+import { verifySession } from "@/lib/auth";
 import { NextResponse } from "next/server";
 
 // GET all transactions for the user
 export async function GET(req) {
   try {
-    // Use the correct verifyAuth function
-    const { user } = await verifyAuth();
+    // Full session check so server-side revocation applies here too
+    const { user } = await verifySession();
     if (!user) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
@@ -29,7 +29,7 @@ export async function GET(req) {
 // POST a new transaction
 export async function POST(req) {
   try {
-    const { user } = await verifyAuth();
+    const { user } = await verifySession();
     if (!user) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }

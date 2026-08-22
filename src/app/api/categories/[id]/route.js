@@ -2,12 +2,12 @@ import { NextResponse } from "next/server";
 import dbConnect from "@/lib/mongodb";
 import Category from "@/models/category.model";
 import Transaction from "@/models/transaction.model";
-import { verifyAuth } from "@/lib/auth";
+import { verifySession } from "@/lib/auth";
 import mongoose from "mongoose";
 
 // PUT rename a custom category
 export async function PUT(request, { params }) {
-  const { user } = await verifyAuth();
+  const { user } = await verifySession();
   if (!user)
     return NextResponse.json({ message: "Not authenticated" }, { status: 401 });
 
@@ -47,7 +47,7 @@ export async function PUT(request, { params }) {
       );
     }
     return NextResponse.json(
-      { message: "Error updating category", error: error.message },
+      { message: "Error updating category" },
       { status: 400 }
     );
   }
@@ -55,7 +55,7 @@ export async function PUT(request, { params }) {
 
 // DELETE a custom category
 export async function DELETE(request, { params }) {
-  const { user } = await verifyAuth();
+  const { user } = await verifySession();
   if (!user)
     return NextResponse.json({ message: "Not authenticated" }, { status: 401 });
 
@@ -88,7 +88,7 @@ export async function DELETE(request, { params }) {
     );
   } catch (error) {
     return NextResponse.json(
-      { message: "Error deleting category", error: error.message },
+      { message: "Error deleting category" },
       { status: 400 }
     );
   }
