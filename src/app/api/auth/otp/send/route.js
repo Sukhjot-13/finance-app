@@ -6,67 +6,17 @@ import dbConnect from "@/lib/mongodb";
 import User from "@/models/user.model";
 import { NextResponse } from "next/server";
 import { TransactionalEmailsApi, SendSmtpEmail } from "@getbrevo/brevo";
+import {
+  recordHit,
+  countRecentHits,
+  popLastHit,
+} from "@/lib/rate-limit";
 
-// Simple in-memory rate limiting (in production, use Redis)
-const otpAttempts = new Map();
-
-function checkRateLimit(email) {
-  const now = Date.now();
-  const attempts = otpAttempts.get(email) || [];
-
-  // Remove attempts older than 1 hour
-  const recentAttempts = attempts.filter(timestamp => now - timestamp < 60 * 60 * 1000);
-
-  if (recentAttempts.length >= 5) {
-    return false; // Rate limited
-  }
-
-  recentAttempts.push(now);
-  otpAttempts.set(email, recentAttempts);
-
-  // Opportunistic sweep so abandoned emails don't grow the map forever
-  if (otpAttempts.size > 1000) {
-    for (const [key, stamps] of otpAttempts) {
-      if (stamps.every(timestamp => now - timestamp >= 60 * 60 * 1000)) {
-        otpAttempts.delete(key);
-      }
-    }
-  }
-  return true;
-}
-
-/**
- * Refunds a rate-limit slot when the email send itself failed — service
- * outages shouldn't burn the user's quota.
- */
-function refundRateLimit(email) {
-  const key = String(email).toLowerCase();
-  const attempts = otpAttempts.get(key);
-  if (!attempts || attempts.length === 0) return;
-  attempts.pop();
-  if (attempts.length === 0) otpAttempts.delete(key);
-}
-
-// Per-IP cap: stops one address from OTP-bombing many different emails.
-// (Per-email caps alone leave the SENDER unlimited.) 20 sends/hour/IP.
-const MAX_PER_IP_PER_HOUR = 20;
-const ipAttempts = new Map();
-
-function checkIpRateLimit(ip) {
-  const now = Date.now();
-  const attempts = ipAttempts.get(ip) || [];
-  const recent = attempts.filter((t) => now - t < 60 * 60 * 1000);
-  if (recent.length >= MAX_PER_IP_PER_HOUR) return false;
-  recent.push(now);
-  ipAttempts.set(ip, recent);
-  // Opportunistic sweep
-  if (ipAttempts.size > 1000) {
-    for (const [key, stamps] of ipAttempts) {
-      if (stamps.every((t) => now - t >= 60 * 60 * 1000)) ipAttempts.delete(key);
-    }
-  }
-  return true;
-}
+// Sliding-window limits backed by MongoDB (shared across instances).
+const EMAIL_WINDOW_MS = 60 * 60 * 1000; // 1 hour
+const EMAIL_MAX = 5; // per email address
+const IP_WINDOW_MS = 60 * 60 * 1000; // 1 hour
+const IP_MAX = 20; // per IP — stops OTP-bombing many addresses at once
 
 function getClientIp(request) {
   const forwarded = request.headers.get("x-forwarded-for");
@@ -108,20 +58,24 @@ export async function POST(request) {
       );
     }
 
-    // Check rate limiting (per email AND per IP)
-    if (!checkRateLimit(email.toLowerCase())) {
+    // Rate limiting — per email AND per sender IP, stored in MongoDB so the
+    // counters are shared across instances and survive restarts.
+    const emailKey = `otp-send:${email.toLowerCase()}`;
+    const ipKey = `otp-send-ip:${getClientIp(request)}`;
+    const [recentByEmail, recentByIp] = await Promise.all([
+      countRecentHits(emailKey, EMAIL_WINDOW_MS),
+      countRecentHits(ipKey, IP_WINDOW_MS),
+    ]);
+    if (recentByEmail >= EMAIL_MAX || recentByIp >= IP_MAX) {
       return NextResponse.json(
         { message: "Too many OTP requests. Please wait before trying again." },
         { status: 429 }
       );
     }
-    const clientIp = getClientIp(request);
-    if (!checkIpRateLimit(clientIp)) {
-      return NextResponse.json(
-        { message: "Too many OTP requests. Please wait before trying again." },
-        { status: 429 }
-      );
-    }
+    await Promise.all([
+      recordHit(emailKey, EMAIL_WINDOW_MS),
+      recordHit(ipKey, IP_WINDOW_MS),
+    ]);
 
     // Cryptographically secure 6-digit OTP (Math.random() is predictable)
     const otp = randomInt(100000, 1000000).toString();
@@ -180,7 +134,7 @@ export async function POST(request) {
       await apiInstance.sendTransacEmail(sendSmtpEmail);
     } catch (sendError) {
       // The stored code was never delivered — restore whatever pending OTP
-      // existed before this request and give the rate-limit slot back.
+      // existed before this request and refund both rate-limit slots.
       try {
         user.otp = previousOtp;
         user.otpExpires = previousOtpExpires;
@@ -188,7 +142,8 @@ export async function POST(request) {
       } catch (restoreError) {
         console.error("OTP restore after failed send error:", restoreError.message);
       }
-      refundRateLimit(email);
+      popLastHit(emailKey).catch(() => {});
+      popLastHit(ipKey).catch(() => {});
       throw sendError;
     }
 

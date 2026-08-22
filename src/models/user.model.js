@@ -3,6 +3,7 @@ import mongoose from "mongoose";
 import bcrypt from "bcryptjs";
 
 const RefreshTokenSchema = new mongoose.Schema({
+  // SHA-256 hash of the JWT (never the raw token) — see lib/auth.js.
   token: { type: String, required: true },
   deviceInfo: { type: String }, // e.g., User-Agent string
   ipAddress: { type: String },
@@ -13,6 +14,10 @@ const RefreshTokenSchema = new mongoose.Schema({
     // tokens are removed by purgeExpiredRefreshTokens() (src/lib/auth.js),
     // called on login and token refresh.
   },
+  // Set when this token is rotated away. Within REFRESH_ROTATION_GRACE_MS
+  // it still authenticates (multi-tab race absorption); after that it's
+  // purged, and presenting it is treated as reuse/theft.
+  rotatedAt: { type: Date, default: null },
 });
 
 const UserSchema = new mongoose.Schema(

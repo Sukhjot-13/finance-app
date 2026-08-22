@@ -6,58 +6,22 @@ import {
   generateAccessToken,
   generateRefreshToken,
   purgeExpiredRefreshTokens,
+  hashToken,
 } from "@/lib/auth";
 import { cookies } from "next/headers";
 import dbConnect from "@/lib/mongodb";
+import { recordHit, countRecentHits, resetKey } from "@/lib/rate-limit";
 
-// In-memory brute-force protection (in production, use Redis).
-// 5 failed attempts per email within 15 minutes locks that email out for
-// 15 minutes. Entries reset on success and are swept when the map grows.
-const LOCKOUT_MS = 15 * 60 * 1000;
-const MAX_ATTEMPTS = 5;
-const verifyAttempts = new Map();
+// Brute-force protection, backed by MongoDB so it is shared across
+// instances and survives restarts. 5 failed attempts per email inside a
+// sliding 15-minute window locks that email out for the remainder of it.
+const VERIFY_WINDOW_MS = 15 * 60 * 1000;
+const VERIFY_MAX_ATTEMPTS = 5;
 
 // bcrypt hash of a throwaway string. Compared against when no real OTP
 // exists so the endpoint's timing is identical either way.
 const DUMMY_HASH =
   "$2b$10$k01Lo54J/UL7JlMkAOoXv.rmp/VE03sYCLi0rKBHa7.KQT.duddqa";
-
-function getAttemptState(email) {
-  const now = Date.now();
-  let entry = verifyAttempts.get(email);
-  if (!entry) {
-    entry = { attempts: [], lockedUntil: 0 };
-    verifyAttempts.set(email, entry);
-  }
-  if (entry.lockedUntil <= now && entry.attempts.length > 0) {
-    entry.attempts = entry.attempts.filter((t) => now - t < LOCKOUT_MS);
-  }
-  return { entry, now };
-}
-
-function isLockedOut(entry, now) {
-  if (entry.lockedUntil > now) return true;
-  // Auto-lock once the failure threshold inside the window is reached
-  return entry.attempts.length >= MAX_ATTEMPTS;
-}
-
-function recordFailure(entry) {
-  entry.attempts.push(Date.now());
-  if (entry.attempts.length >= MAX_ATTEMPTS) {
-    entry.lockedUntil = Date.now() + LOCKOUT_MS;
-  }
-}
-
-function sweepStaleAttempts() {
-  if (verifyAttempts.size <= 1000) return;
-  const now = Date.now();
-  for (const [key, entry] of verifyAttempts) {
-    const stale =
-      entry.lockedUntil <= now &&
-      entry.attempts.every((t) => now - t >= LOCKOUT_MS);
-    if (stale) verifyAttempts.delete(key);
-  }
-}
 
 /**
  * Finds a user by email. New accounts are always stored lowercased; the
@@ -79,21 +43,20 @@ export async function POST(req) {
     return sendError("Email and OTP are required.", 400);
   }
 
-  sweepStaleAttempts();
-  const key = String(email).trim().toLowerCase();
-  const { entry, now } = getAttemptState(key);
-
-  // Reject cheaply while locked — identical message as any other failure so
-  // attackers learn nothing extra.
-  if (isLockedOut(entry, now)) {
-    return sendError(
-      "Too many failed attempts. Please try again later.",
-      429
-    );
-  }
-
   try {
     await dbConnect();
+
+    const attemptKey = `otp-verify:${String(email).trim().toLowerCase()}`;
+    const recentFailures = await countRecentHits(attemptKey, VERIFY_WINDOW_MS);
+
+    // Reject cheaply while locked out — identical message as any other
+    // failure so attackers learn nothing extra.
+    if (recentFailures >= VERIFY_MAX_ATTEMPTS) {
+      return sendError(
+        "Too many failed attempts. Please try again later.",
+        429
+      );
+    }
 
     const user = await findUserByEmail(email);
 
@@ -117,21 +80,22 @@ export async function POST(req) {
     }
 
     if (failureMessage) {
-      recordFailure(entry);
+      await recordHit(attemptKey, VERIFY_WINDOW_MS);
       return sendError(failureMessage, 400);
     }
 
     // Success — clear OTP fields and this email's failure history
     user.otp = undefined;
     user.otpExpires = undefined;
-    verifyAttempts.delete(key);
+    resetKey(attemptKey).catch(() => {});
 
     // Generate tokens
     const accessToken = generateAccessToken(user._id);
     const refreshToken = generateRefreshToken(user._id);
 
-    // Store the new refresh token in the database
-    user.refreshTokens.push({ token: refreshToken });
+    // Store the HASHED refresh token in the database (a DB leak must not
+    // expose live session tokens).
+    user.refreshTokens.push({ token: hashToken(refreshToken) });
     await user.save();
 
     // TTL indexes don't work on subdocument arrays — prune stale sessions

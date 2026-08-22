@@ -4,7 +4,23 @@ import Transaction from "@/models/transaction.model";
 import { verifySession } from "@/lib/auth";
 import { NextResponse } from "next/server";
 
-// GET all transactions for the user
+// Escapes user input so it's always treated literally in $regex filters.
+function escapeRegex(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function parseInstant(value) {
+  if (!value) return null;
+  const parsed = new Date(value);
+  return isNaN(parsed.getTime()) ? null : parsed;
+}
+
+// GET transactions for the user — server-side filtered + paginated.
+// Query params:
+//   page (default 1), limit (default 50, max 200)
+//   type ("income"|"expense"), category, search (description/category)
+//   from / to (absolute instants bounding the transaction date)
+// Response shape: { transactions, total, page, pageSize, totalPages }
 export async function GET(req) {
   try {
     // Full session check so server-side revocation applies here too
@@ -14,12 +30,58 @@ export async function GET(req) {
     }
 
     await dbConnect();
-    
-    const transactions = await Transaction.find({ userId: user._id }).sort({
-      date: -1,
-      createdAt: -1,
-    });
-    return NextResponse.json(transactions, { status: 200 });
+
+    const { searchParams } = new URL(req.url);
+    const page = Math.max(parseInt(searchParams.get("page"), 10) || 1, 1);
+    const limit = Math.min(
+      Math.max(parseInt(searchParams.get("limit"), 10) || 50, 1),
+      200
+    );
+
+    const query = { userId: user._id };
+
+    const type = searchParams.get("type");
+    if (type === "income" || type === "expense") {
+      query.type = type;
+    }
+
+    const category = searchParams.get("category");
+    if (category && category.trim()) {
+      query.category = category.trim();
+    }
+
+    const search = searchParams.get("search");
+    if (search && search.trim()) {
+      const pattern = new RegExp(escapeRegex(search.trim()), "i");
+      query.$or = [{ description: pattern }, { category: pattern }];
+    }
+
+    const from = parseInstant(searchParams.get("from"));
+    const to = parseInstant(searchParams.get("to"));
+    if (from || to) {
+      query.date = {};
+      if (from) query.date.$gte = from;
+      if (to) query.date.$lte = to;
+    }
+
+    const [transactions, total] = await Promise.all([
+      Transaction.find(query)
+        .sort({ date: -1, createdAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit),
+      Transaction.countDocuments(query),
+    ]);
+
+    return NextResponse.json(
+      {
+        transactions,
+        total,
+        page,
+        pageSize: limit,
+        totalPages: Math.max(Math.ceil(total / limit), 1),
+      },
+      { status: 200 }
+    );
   } catch (error) {
     console.error("GET transactions error:", error);
     return NextResponse.json({ message: "Server error" }, { status: 500 });

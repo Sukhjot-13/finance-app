@@ -1,7 +1,7 @@
 // src/app/api/auth/logout/route.js
 import { cookies } from "next/headers";
 import { sendSuccess, sendError } from "@/lib/server-utils";
-import { verifyToken } from "@/lib/auth";
+import { verifyToken, hashToken } from "@/lib/auth";
 import User from "@/models/user.model";
 import dbConnect from "@/lib/mongodb";
 
@@ -13,7 +13,8 @@ export async function POST(req) {
     await dbConnect();
 
     if (refreshToken) {
-      // Find the user and remove the specific refresh token
+      // Remove this session's token from the DB. Stored entries are hashes;
+      // the raw value is included for pre-hashing legacy sessions.
       const decoded = verifyToken(
         refreshToken,
         process.env.REFRESH_TOKEN_SECRET
@@ -21,7 +22,11 @@ export async function POST(req) {
       if (decoded && decoded.userId) {
         await User.updateOne(
           { _id: decoded.userId },
-          { $pull: { refreshTokens: { token: refreshToken } } }
+          {
+            $pull: {
+              refreshTokens: { token: { $in: [hashToken(refreshToken), refreshToken] } },
+            },
+          }
         );
       }
     }

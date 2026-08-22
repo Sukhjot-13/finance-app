@@ -1,6 +1,6 @@
 // FILE: finance-app/src/lib/auth.js
 import jwt from "jsonwebtoken";
-import { randomUUID } from "crypto";
+import { randomUUID, createHash } from "crypto";
 import { cookies } from "next/headers";
 import { jwtVerify } from "jose";
 
@@ -10,11 +10,25 @@ const REFRESH_TOKEN_SECRET = process.env.REFRESH_TOKEN_SECRET;
 // Must match the JWT expiresIn for refresh tokens below
 export const REFRESH_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
+// How long a rotated-away refresh token still authenticates. This absorbs
+// multi-tab races (two tabs refreshing with the same cookie at once) so
+// rotation never logs people out. After the grace window a presented
+// rotated token is treated as token theft (reuse detection).
+export const REFRESH_ROTATION_GRACE_MS = 60 * 1000;
+
 if (!ACCESS_TOKEN_SECRET || !REFRESH_TOKEN_SECRET) {
   throw new Error("Missing JWT secret environment variables.");
 }
 
 const accessTokenSecret = new TextEncoder().encode(ACCESS_TOKEN_SECRET);
+
+/**
+ * Refresh tokens are stored in MongoDB as SHA-256 hashes — a database leak
+ * must not expose usable session tokens. Legacy plaintext entries are still
+ * accepted on lookups until they expire naturally.
+ */
+export const hashToken = (token) =>
+  createHash("sha256").update(token).digest("hex");
 
 export const generateAccessToken = (userId) => {
   return jwt.sign({ userId }, ACCESS_TOKEN_SECRET, { expiresIn: "15m" });
@@ -91,9 +105,15 @@ export const verifySession = async () => {
   try {
     await dbConnect();
 
+    const hashedRefresh = hashToken(refreshToken);
     const userFromDb = await User.findOne({
       _id: decoded.userId,
-      "refreshTokens.token": refreshToken,
+      // Match the hash; legacy plaintext entries still work until they
+      // expire or get rotated.
+      $or: [
+        { "refreshTokens.token": hashedRefresh },
+        { "refreshTokens.token": refreshToken },
+      ],
     });
 
     if (!userFromDb) {
@@ -115,13 +135,25 @@ export const verifySession = async () => {
 /**
  * MongoDB TTL indexes do not work on subdocument arrays, so expired refresh
  * tokens would otherwise live forever. Call this on login and on refresh to
- * pull tokens older than the TTL.
+ * pull:
+ *  - tokens older than the full TTL, and
+ *  - rotated-away tokens past the short rotation-grace window.
  */
 export const purgeExpiredRefreshTokens = async (userId) => {
   const User = (await import("@/models/user.model")).default;
-  const cutoff = new Date(Date.now() - REFRESH_TOKEN_TTL_MS);
+  const ttlCutoff = new Date(Date.now() - REFRESH_TOKEN_TTL_MS);
+  const graceCutoff = new Date(Date.now() - REFRESH_ROTATION_GRACE_MS);
   await User.updateOne(
     { _id: userId },
-    { $pull: { refreshTokens: { createdAt: { $lt: cutoff } } } }
+    {
+      $pull: {
+        refreshTokens: {
+          $or: [
+            { createdAt: { $lt: ttlCutoff } },
+            { rotatedAt: { $exists: true, $ne: null, $lt: graceCutoff } },
+          ],
+        },
+      },
+    }
   );
 };

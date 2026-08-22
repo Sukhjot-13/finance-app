@@ -1,7 +1,7 @@
 // src/app/(main)/transactions/page.js
 "use client";
 
-import { useState, useEffect, useMemo, useContext } from "react";
+import { useState, useEffect, useContext } from "react";
 import { formatCurrency, formatDate, formatDateForInput } from "@/lib/utils";
 import api from "@/lib/api";
 import { Trash2, Edit, X, ChevronDown } from "lucide-react";
@@ -344,8 +344,12 @@ function TransactionCard({ transaction, userCurrency, onEdit, onDelete }) {
 }
 
 // Main Page Component
+const PAGE_SIZE = 50;
+
 export default function TransactionsPage() {
   const [transactions, setTransactions] = useState([]);
+  const [pageInfo, setPageInfo] = useState({ page: 1, totalPages: 1, total: 0 });
+  const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [editingTransaction, setEditingTransaction] = useState(null);
   const [error, setError] = useState("");
@@ -357,78 +361,81 @@ export default function TransactionsPage() {
     startDate: "",
     endDate: "",
   });
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [categoryOptions, setCategoryOptions] = useState([]);
   const { user } = useContext(UserContext);
 
-  const categories = [...new Set(transactions.map((t) => t.category))].sort();
+  // Debounce the search box so typing doesn't hammer the server.
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(filters.search), 300);
+    return () => clearTimeout(timer);
+  }, [filters.search]);
 
-  // Derive the visible list during render instead of mirroring it in state
-  // with an effect (avoids cascading renders entirely).
-  const filteredTransactions = useMemo(() => {
-    let result = [...transactions];
-
-    if (filters.search) {
-      const q = filters.search.toLowerCase();
-      result = result.filter(
-        (t) =>
-          t.description?.toLowerCase().includes(q) ||
-          t.category.toLowerCase().includes(q)
-      );
-    }
-
-    if (filters.type !== "all") {
-      result = result.filter((t) => t.type === filters.type);
-    }
-
-    if (filters.category !== "all") {
-      result = result.filter((t) => t.category === filters.category);
-    }
-
-    if (filters.startDate) {
-      result = result.filter((t) => new Date(t.date) >= new Date(filters.startDate));
-    }
-
-    if (filters.endDate) {
-      const end = new Date(filters.endDate);
-      end.setHours(23, 59, 59, 999);
-      result = result.filter((t) => new Date(t.date) <= end);
-    }
-
-    return result;
-  }, [transactions, filters]);
-
-  const fetchTransactions = async () => {
-    try {
-      const res = await api("/api/transactions");
-      if (!res.ok) throw new Error("Failed to fetch");
-      const data = await res.json();
-      setTransactions(data);
-      setError("");
-    } catch (err) {
-      console.error("Error fetching transactions:", err);
-      setError("Failed to load transactions.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Event-triggered refetch (delete/edit): re-show skeletons first. Kept
-  // separate from fetchTransactions so the mount effect has no synchronous
-  // setState.
-  const refetchWithSkeleton = () => {
-    setLoading(true);
-    fetchTransactions();
-  };
-
+  // Category filter options come from the merged defaults+custom list
+  // (server-side paging means the current page no longer holds every
+  // category ever used).
   useEffect(() => {
     let cancelled = false;
-    api("/api/transactions")
+    api("/api/categories")
+      .then((res) => {
+        if (!res.ok) throw new Error("Failed to load categories");
+        return res.json();
+      })
+      .then((data) => {
+        if (cancelled) return;
+        const names = [
+          ...(data.expense || []),
+          ...(data.income || []),
+        ].sort((a, b) => a.localeCompare(b));
+        setCategoryOptions(names);
+      })
+      .catch((err) =>
+        console.error("Failed to load category options:", err)
+      );
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const buildQueryString = (targetPage) => {
+    const params = new URLSearchParams();
+    params.set("page", String(targetPage));
+    params.set("limit", String(PAGE_SIZE));
+    if (debouncedSearch.trim()) params.set("search", debouncedSearch.trim());
+    if (filters.type !== "all") params.set("type", filters.type);
+    if (filters.category !== "all") params.set("category", filters.category);
+    if (filters.startDate) {
+      params.set(
+        "from",
+        new Date(filters.startDate + "T00:00:00").toISOString()
+      );
+    }
+    if (filters.endDate) {
+      params.set(
+        "to",
+        new Date(filters.endDate + "T23:59:59.999").toISOString()
+      );
+    }
+    return params.toString();
+  };
+
+  // Server-side filtered + paginated fetch. Runs whenever the page number
+  // or any filter changes (search is debounced).
+  useEffect(() => {
+    let cancelled = false;
+    api(`/api/transactions?${buildQueryString(page)}`)
       .then((res) => {
         if (!res.ok) throw new Error("Failed to fetch");
         return res.json();
       })
       .then((data) => {
         if (cancelled) return;
-        setTransactions(data);
+        setTransactions(data.transactions || []);
+        setPageInfo({
+          page: data.page || page,
+          totalPages: data.totalPages || 1,
+          total: data.total ?? 0,
+        });
         setError("");
       })
       .catch((err) => {
@@ -441,7 +448,44 @@ export default function TransactionsPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, debouncedSearch, filters.type, filters.category, filters.startDate, filters.endDate]);
+
+  // Filter updates always snap back to page 1.
+  const updateFilter = (key, value) => {
+    setPage(1);
+    setFilters((f) => ({ ...f, [key]: value }));
+  };
+
+  const clearFilters = () => {
+    setPage(1);
+    setFilters({ search: "", type: "all", category: "all", startDate: "", endDate: "" });
+  };
+
+  const hasActiveFilters =
+    Boolean(filters.search.trim()) ||
+    filters.type !== "all" ||
+    filters.category !== "all" ||
+    Boolean(filters.startDate) ||
+    Boolean(filters.endDate);
+
+  const refetchCurrentPage = () => {
+    api(`/api/transactions?${buildQueryString(page)}`)
+      .then((res) => {
+        if (!res.ok) throw new Error("Failed to fetch");
+        return res.json();
+      })
+      .then((data) => {
+        setTransactions(data.transactions || []);
+        setPageInfo((prev) => ({
+          ...prev,
+          total: data.total ?? prev.total,
+          totalPages: data.totalPages || prev.totalPages,
+        }));
+        setError("");
+      })
+      .catch(console.error);
+  };
 
   const handleDelete = async (id) => {
     setDeletingId(id);
@@ -450,7 +494,7 @@ export default function TransactionsPage() {
       if (!res.ok) throw new Error("Delete failed");
       setDeletingId(null);
       setError("");
-      refetchWithSkeleton();
+      refetchCurrentPage();
     } catch (err) {
       console.error("Error deleting transaction:", err);
       setError("Failed to delete transaction.");
@@ -477,7 +521,7 @@ export default function TransactionsPage() {
       }
       setEditingTransaction(null);
       setError("");
-      refetchWithSkeleton();
+      refetchCurrentPage();
       return { ok: true };
     } catch (err) {
       console.error("Error updating transaction:", err);
@@ -539,13 +583,13 @@ export default function TransactionsPage() {
             type="text"
             placeholder="Search..."
             value={filters.search}
-            onChange={(e) => setFilters((f) => ({ ...f, search: e.target.value }))}
+            onChange={(e) => updateFilter("search", e.target.value)}
             className="w-full sm:flex-1 px-3 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
           />
           <div className="flex gap-2 flex-wrap">
             <select
               value={filters.type}
-              onChange={(e) => setFilters((f) => ({ ...f, type: e.target.value }))}
+              onChange={(e) => updateFilter("type", e.target.value)}
               className="flex-1 sm:flex-none px-3 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
             >
               <option value="all">All Types</option>
@@ -554,40 +598,47 @@ export default function TransactionsPage() {
             </select>
             <select
               value={filters.category}
-              onChange={(e) => setFilters((f) => ({ ...f, category: e.target.value }))}
+              onChange={(e) => updateFilter("category", e.target.value)}
               className="flex-1 sm:flex-none px-3 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
             >
               <option value="all">All Categories</option>
-              {categories.map((cat) => (
+              {categoryOptions.map((cat) => (
                 <option key={cat} value={cat}>{cat}</option>
               ))}
             </select>
             <input
               type="date"
               value={filters.startDate}
-              onChange={(e) => setFilters((f) => ({ ...f, startDate: e.target.value }))}
+              onChange={(e) => updateFilter("startDate", e.target.value)}
               className="flex-1 sm:flex-none px-3 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 min-w-0 sm:min-w-[130px]"
               title="Start date"
             />
             <input
               type="date"
               value={filters.endDate}
-              onChange={(e) => setFilters((f) => ({ ...f, endDate: e.target.value }))}
+              onChange={(e) => updateFilter("endDate", e.target.value)}
               className="flex-1 sm:flex-none px-3 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 min-w-0 sm:min-w-[130px]"
               title="End date"
             />
           </div>
         </div>
 
-        {(filters.search || filters.type !== "all" || filters.category !== "all" || filters.startDate || filters.endDate) && (
-          <div className="mb-4 flex items-center gap-2 text-sm text-slate-500">
-            <span>{filteredTransactions.length} result{filteredTransactions.length !== 1 ? "s" : ""}</span>
-            <button
-              onClick={() => setFilters({ search: "", type: "all", category: "all", startDate: "", endDate: "" })}
-              className="text-indigo-600 hover:text-indigo-800 underline"
-            >
-              Clear filters
-            </button>
+        {(hasActiveFilters || pageInfo.total > 0) && (
+          <div className="mb-4 flex items-center justify-between gap-2 flex-wrap text-sm text-slate-500">
+            <span>
+              {pageInfo.total} transaction{pageInfo.total !== 1 ? "s" : ""}
+              {hasActiveFilters ? " match your filters" : ""}
+            </span>
+            {pageInfo.totalPages > 1 && (
+              <span className="text-xs">
+                Page {pageInfo.page} of {pageInfo.totalPages}
+              </span>
+            )}
+            {hasActiveFilters && (
+              <button onClick={clearFilters} className="text-indigo-600 hover:text-indigo-800 underline">
+                Clear filters
+              </button>
+            )}
           </div>
         )}
 
@@ -605,7 +656,7 @@ export default function TransactionsPage() {
               </tr>
             </thead>
             <tbody>
-              {filteredTransactions.map((t) => (
+              {transactions.map((t) => (
                 <tr key={t._id} className="border-b hover:bg-gray-50">
                   <td className="p-3 text-sm">{formatDate(t.date)}</td>
                   <td className="p-3">
@@ -676,18 +727,18 @@ export default function TransactionsPage() {
               ))}
             </tbody>
           </table>
-          {filteredTransactions.length === 0 && (
+          {transactions.length === 0 && (
             <p className="text-center py-10 text-gray-500">
-              {transactions.length === 0
-                ? "You have no transactions."
-                : "No transactions match your filters."}
+              {hasActiveFilters
+                ? "No transactions match your filters."
+                : "You have no transactions."}
             </p>
           )}
         </div>
 
         {/* Mobile: Card view */}
         <div className="sm:hidden space-y-3">
-          {filteredTransactions.map((t) => (
+          {transactions.map((t) => (
             <TransactionCard
               key={t._id}
               transaction={t}
@@ -696,14 +747,37 @@ export default function TransactionsPage() {
               onDelete={handleDelete}
             />
           ))}
-          {filteredTransactions.length === 0 && (
+          {transactions.length === 0 && (
             <p className="text-center py-10 text-gray-500">
-              {transactions.length === 0
-                ? "You have no transactions."
-                : "No transactions match your filters."}
+              {hasActiveFilters
+                ? "No transactions match your filters."
+                : "You have no transactions."}
             </p>
           )}
         </div>
+
+        {/* Pagination */}
+        {pageInfo.totalPages > 1 && (
+          <div className="mt-6 flex items-center justify-center gap-4">
+            <button
+              onClick={() => setPage((p) => Math.max(p - 1, 1))}
+              disabled={pageInfo.page <= 1}
+              className="px-4 py-2 text-sm rounded-md border border-slate-300 text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              Previous
+            </button>
+            <span className="text-sm text-slate-500">
+              Page {pageInfo.page} of {pageInfo.totalPages}
+            </span>
+            <button
+              onClick={() => setPage((p) => Math.min(p + 1, pageInfo.totalPages))}
+              disabled={pageInfo.page >= pageInfo.totalPages}
+              className="px-4 py-2 text-sm rounded-md border border-slate-300 text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              Next
+            </button>
+          </div>
+        )}
       </div>
     </>
   );
