@@ -29,10 +29,15 @@ export async function POST(req) {
       { _id: decoded.userId },
       { $set: { refreshTokens: [] } } // This empties the array
     );
-
   } catch (error) {
     console.error("Logout-all error:", error.message);
-    // Don't expose server errors, but still clear cookies as a precaution
+    // Don't pretend it worked — other devices may still have live sessions.
+    cookieStore.delete("accessToken");
+    cookieStore.delete("refreshToken");
+    return sendError(
+      "Could not log out from all devices. Please log in and try again.",
+      500
+    );
   } finally {
     // Clear the cookies on the client side regardless of DB operation success
     cookieStore.delete("accessToken");

@@ -1,11 +1,14 @@
 // FILE: finance-app/src/lib/auth.js
 import jwt from "jsonwebtoken";
-import { nanoid } from "nanoid";
+import { randomUUID } from "crypto";
 import { cookies } from "next/headers";
 import { jwtVerify } from "jose";
 
 const ACCESS_TOKEN_SECRET = process.env.ACCESS_TOKEN_SECRET;
 const REFRESH_TOKEN_SECRET = process.env.REFRESH_TOKEN_SECRET;
+
+// Must match the JWT expiresIn for refresh tokens below
+export const REFRESH_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
 if (!ACCESS_TOKEN_SECRET || !REFRESH_TOKEN_SECRET) {
   throw new Error("Missing JWT secret environment variables.");
@@ -18,7 +21,7 @@ export const generateAccessToken = (userId) => {
 };
 
 export const generateRefreshToken = (userId) => {
-  return jwt.sign({ userId, jti: nanoid() }, REFRESH_TOKEN_SECRET, {
+  return jwt.sign({ userId, jti: randomUUID() }, REFRESH_TOKEN_SECRET, {
     expiresIn: "30d",
   });
 };
@@ -95,4 +98,18 @@ export const verifySession = async () => {
   } catch (error) {
     return { user: null, error: error.message };
   }
+};
+
+/**
+ * MongoDB TTL indexes do not work on subdocument arrays, so expired refresh
+ * tokens would otherwise live forever. Call this on login and on refresh to
+ * pull tokens older than the TTL.
+ */
+export const purgeExpiredRefreshTokens = async (userId) => {
+  const User = (await import("@/models/user.model")).default;
+  const cutoff = new Date(Date.now() - REFRESH_TOKEN_TTL_MS);
+  await User.updateOne(
+    { _id: userId },
+    { $pull: { refreshTokens: { createdAt: { $lt: cutoff } } } }
+  );
 };

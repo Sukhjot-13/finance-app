@@ -1,7 +1,11 @@
 // src/app/api/auth/otp/verify/route.js
 import User from "@/models/user.model";
 import { sendError, sendSuccess } from "@/lib/server-utils";
-import { generateAccessToken, generateRefreshToken } from "@/lib/auth";
+import {
+  generateAccessToken,
+  generateRefreshToken,
+  purgeExpiredRefreshTokens,
+} from "@/lib/auth";
 import { cookies } from "next/headers";
 import dbConnect from "@/lib/mongodb";
 
@@ -121,6 +125,9 @@ export async function POST(req) {
     // Store the new refresh token in the database
     user.refreshTokens.push({ token: refreshToken });
     await user.save();
+
+    // TTL indexes don't work on subdocument arrays — prune stale sessions
+    await purgeExpiredRefreshTokens(user._id);
 
     // Set cookies
     const cookieStore = await cookies();

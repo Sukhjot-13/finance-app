@@ -9,8 +9,9 @@ const RefreshTokenSchema = new mongoose.Schema({
   createdAt: {
     type: Date,
     default: Date.now,
-    // This tells MongoDB to automatically delete documents in this sub-array after 30 days
-    expires: '30d', 
+    // NOTE: MongoDB TTL indexes do NOT work on subdocument arrays. Expired
+    // tokens are removed by purgeExpiredRefreshTokens() (src/lib/auth.js),
+    // called on login and token refresh.
   },
 });
 
