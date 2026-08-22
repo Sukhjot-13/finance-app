@@ -41,9 +41,10 @@ export default function BudgetManager({ isOpen, onClose, onSaved }) {
 
   const removeBudget = async (category) => {
     try {
-      const res = await fetch(`/api/budgets?category=${category}&month=${month}`, {
-        method: "DELETE",
-      });
+      const res = await fetch(
+        `/api/budgets?category=${encodeURIComponent(category)}&month=${month}`,
+        { method: "DELETE" }
+      );
       if (res.ok) {
         setBudgets((prev) => {
           const next = { ...prev };

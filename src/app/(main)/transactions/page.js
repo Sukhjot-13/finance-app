@@ -70,11 +70,15 @@ function EditTransactionModal({ transaction, onClose, onSave }) {
       }
     }
     // Send the date as an instant at 12:00 noon in the user's local timezone,
-    // matching AddTransactionDrawer (see the comment there).
+    // matching AddTransactionDrawer (see the comment there). Send only the
+    // editable fields — never echo _id/userId/timestamps back to the server.
     await onSave({
-      ...formData,
+      type: formData.type,
+      amount: formData.amount,
       category: finalCategory,
       date: new Date(formData.date + "T12:00:00"),
+      description: formData.description,
+      excludeFromBudget: !!formData.excludeFromBudget,
     });
   };
 
@@ -353,12 +357,12 @@ export default function TransactionsPage() {
     }
   };
 
-  const handleSaveEdit = async (updatedTransaction) => {
+  const handleSaveEdit = async (id, updatedFields) => {
     try {
-      const res = await api(`/api/transactions/${updatedTransaction._id}`, {
+      const res = await api(`/api/transactions/${id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(updatedTransaction),
+        body: JSON.stringify(updatedFields),
       });
       if (!res.ok) throw new Error("Failed to update");
       setEditingTransaction(null);
@@ -398,7 +402,7 @@ export default function TransactionsPage() {
           <EditTransactionModal
             transaction={editingTransaction}
             onClose={() => setEditingTransaction(null)}
-            onSave={handleSaveEdit}
+            onSave={(fields) => handleSaveEdit(editingTransaction._id, fields)}
           />
         )}
       </AnimatePresence>

@@ -12,7 +12,7 @@ import {
   Tooltip,
   Legend,
 } from "chart.js";
-import { formatCurrency } from "@/lib/utils";
+import { formatCurrency, formatDateForInput } from "@/lib/utils";
 import { UserContext } from "@/app/(main)/layout"; // Import UserContext
 
 ChartJS.register(
@@ -25,12 +25,12 @@ ChartJS.register(
 );
 
 export default function ReportsPage() {
+  // Local-time defaults — toISOString() would give users west of UTC the
+  // previous day after ~7pm local on the 1st of the month.
   const [startDate, setStartDate] = useState(
-    new Date(new Date().setDate(1)).toISOString().split("T")[0]
+    formatDateForInput(new Date(new Date().getFullYear(), new Date().getMonth(), 1))
   );
-  const [endDate, setEndDate] = useState(
-    new Date().toISOString().split("T")[0]
-  );
+  const [endDate, setEndDate] = useState(formatDateForInput(new Date()));
   const [report, setReport] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
