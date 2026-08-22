@@ -13,6 +13,7 @@ import {
   Legend,
 } from "chart.js";
 import { formatCurrency, formatDateForInput } from "@/lib/utils";
+import api from "@/lib/api";
 import { UserContext } from "@/app/(main)/layout"; // Import UserContext
 
 ChartJS.register(
@@ -43,7 +44,7 @@ export default function ReportsPage() {
     try {
       // Send absolute instants parsed in the BROWSER (user's timezone) plus
       // the raw strings for backward compatibility.
-      const res = await fetch("/api/reports/generate", {
+      const res = await api("/api/reports/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

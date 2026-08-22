@@ -20,16 +20,23 @@ function EditTransactionModal({ transaction, onClose, onSave }) {
   const [categories, setCategories] = useState({ expense: [], income: [] });
   const [newCategory, setNewCategory] = useState("");
   const [isAddingNewCategory, setIsAddingNewCategory] = useState(false);
+  const [modalError, setModalError] = useState("");
 
   useEffect(() => {
     setFormData({
       ...transaction,
       date: formatDateForInput(new Date(transaction.date)),
     });
+    setModalError("");
     const fetchCategories = async () => {
-      const res = await api("/api/categories");
-      const data = await res.json();
-      setCategories(data);
+      try {
+        const res = await api("/api/categories");
+        if (!res.ok) throw new Error("Failed to load categories");
+        const data = await res.json();
+        setCategories(data);
+      } catch (err) {
+        console.error("Failed to fetch categories:", err);
+      }
     };
     fetchCategories();
   }, [transaction]);
@@ -50,10 +57,11 @@ function EditTransactionModal({ transaction, onClose, onSave }) {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    setModalError("");
     let finalCategory = formData.category;
     if (isAddingNewCategory) {
       if (!newCategory) {
-        alert("Please enter a name for the new category.");
+        setModalError("Please enter a name for the new category.");
         return;
       }
       try {
@@ -65,7 +73,7 @@ function EditTransactionModal({ transaction, onClose, onSave }) {
         if (!res.ok) throw new Error("Failed to create category.");
         finalCategory = newCategory;
       } catch (err) {
-        alert(err.message);
+        setModalError(err.message);
         return;
       }
     }
@@ -104,7 +112,36 @@ function EditTransactionModal({ transaction, onClose, onSave }) {
           </button>
         </div>
         <form onSubmit={handleSubmit}>
+          {modalError && (
+            <p className="mb-3 text-sm text-red-600 bg-red-50 border border-red-200 rounded-md p-2">
+              {modalError}
+            </p>
+          )}
           <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700">Type</label>
+              <div className="mt-1 flex gap-2">
+                {["expense", "income"].map((t) => (
+                  <button
+                    key={t}
+                    type="button"
+                    onClick={() => {
+                      setFormData((prev) => ({ ...prev, type: t, category: "" }));
+                      setIsAddingNewCategory(false);
+                    }}
+                    className={`flex-1 px-3 py-2 rounded-md text-sm font-medium border capitalize ${
+                      formData.type === t
+                        ? t === "expense"
+                          ? "bg-red-50 border-red-300 text-red-700"
+                          : "bg-green-50 border-green-300 text-green-700"
+                        : "border-gray-300 text-gray-600 hover:bg-gray-50"
+                    }`}
+                  >
+                    {t}
+                  </button>
+                ))}
+              </div>
+            </div>
             <div>
               <label className="block text-sm font-medium text-gray-700">Amount</label>
               <input

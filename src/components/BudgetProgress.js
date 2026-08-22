@@ -3,6 +3,7 @@
 import { useState, useEffect, useContext } from "react";
 import { motion } from "framer-motion";
 import { formatCurrency } from "@/lib/utils";
+import api from "@/lib/api";
 import { UserContext } from "@/app/(main)/layout";
 
 export default function BudgetProgress() {
@@ -16,10 +17,13 @@ export default function BudgetProgress() {
     const now = new Date();
     const start = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
     const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-    fetch(
+    api(
       `/api/reports/budget-progress?start=${encodeURIComponent(start)}&month=${month}`
     )
-      .then((res) => res.json())
+      .then((res) => {
+        if (!res.ok) throw new Error("Failed to load budget progress");
+        return res.json();
+      })
       .then((data) => setData(data))
       .catch(console.error)
       .finally(() => setLoading(false));

@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Save, LogOut, AlertTriangle } from "lucide-react";
+import api from "@/lib/api";
 
 export default function ProfilePage() {
   const [user, setUser] = useState(null);
@@ -10,10 +11,12 @@ export default function ProfilePage() {
   const [currency, setCurrency] = useState("USD");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [status, setStatus] = useState(null); // { type: 'success' | 'error', text }
+  const [confirmLogoutAll, setConfirmLogoutAll] = useState(false);
   const router = useRouter();
 
   useEffect(() => {
-    fetch("/api/user")
+    api("/api/user")
       .then((res) => {
         if (!res.ok) throw new Error("Failed to fetch user data");
         return res.json();
@@ -30,35 +33,50 @@ export default function ProfilePage() {
   const handleSave = async (e) => {
     e.preventDefault();
     setSaving(true);
+    setStatus(null);
     try {
-      const res = await fetch("/api/user", {
+      const res = await api("/api/user", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ accountName, currency }),
       });
-      if (!res.ok) throw new Error("Failed to save profile");
-      alert("Profile saved successfully!");
+      if (!res.ok) {
+        let message = "Failed to save profile";
+        try {
+          const data = await res.json();
+          if (data?.message) message = data.message;
+        } catch {
+          // non-JSON error body
+        }
+        throw new Error(message);
+      }
+      setStatus({ type: "success", text: "Profile saved successfully." });
     } catch (error) {
       console.error(error);
-      alert("Error saving profile.");
+      setStatus({
+        type: "error",
+        text: error.message || "Error saving profile.",
+      });
     } finally {
       setSaving(false);
     }
   };
 
   const handleLogoutAll = async () => {
-    if (
-      window.confirm(
-        "Are you sure you want to log out from all devices? This action is irreversible."
-      )
-    ) {
-      try {
-        await fetch("/api/auth/logout-all", { method: "POST" });
-        router.push("/login");
-      } catch (error) {
-        console.error("Failed to log out from all devices", error);
-        alert("Could not log out from all devices.");
-      }
+    if (!confirmLogoutAll) {
+      setConfirmLogoutAll(true);
+      return;
+    }
+    setConfirmLogoutAll(false);
+    try {
+      await api("/api/auth/logout-all", { method: "POST" });
+      router.push("/login");
+    } catch (error) {
+      console.error("Failed to log out from all devices", error);
+      setStatus({
+        type: "error",
+        text: "Could not log out from all devices. Please log in and try again.",
+      });
     }
   };
 
@@ -72,6 +90,29 @@ export default function ProfilePage() {
 
   return (
     <div className="max-w-4xl mx-auto space-y-8">
+      {/* Inline status banner (replaces alert()) */}
+      {status && (
+        <div
+          className={`p-3 rounded-lg border text-sm flex items-center justify-between ${
+            status.type === "success"
+              ? "bg-green-50 border-green-200 text-green-700"
+              : "bg-red-50 border-red-200 text-red-700"
+          }`}
+        >
+          <span>{status.text}</span>
+          <button
+            onClick={() => setStatus(null)}
+            className={`underline text-xs ${
+              status.type === "success"
+                ? "text-green-600 hover:text-green-800"
+                : "text-red-500 hover:text-red-700"
+            }`}
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
       {/* Profile Settings Card */}
       <div className="bg-white p-8 rounded-xl shadow-sm">
         <h2 className="text-2xl font-bold text-slate-800 mb-6">
@@ -158,13 +199,34 @@ export default function ProfilePage() {
                 computers, phones, and tablets. You will need to sign in again
                 everywhere.
               </p>
-              <button
-                onClick={handleLogoutAll}
-                className="mt-3 flex items-center gap-2 bg-red-600 text-white font-semibold py-2 px-3 rounded-lg shadow-sm hover:bg-red-700 transition-colors text-sm"
-              >
-                <LogOut size={16} />
-                Log Out From All Devices
-              </button>
+              {confirmLogoutAll ? (
+                <div className="mt-3 flex items-center gap-2">
+                  <span className="text-sm font-medium text-red-700">
+                    Are you sure?
+                  </span>
+                  <button
+                    onClick={handleLogoutAll}
+                    className="flex items-center gap-2 bg-red-600 text-white font-semibold py-2 px-3 rounded-lg shadow-sm hover:bg-red-700 transition-colors text-sm"
+                  >
+                    <LogOut size={16} />
+                    Yes, Log Out Everywhere
+                  </button>
+                  <button
+                    onClick={() => setConfirmLogoutAll(false)}
+                    className="px-3 py-2 text-sm text-slate-600 hover:text-slate-800"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={handleLogoutAll}
+                  className="mt-3 flex items-center gap-2 bg-red-600 text-white font-semibold py-2 px-3 rounded-lg shadow-sm hover:bg-red-700 transition-colors text-sm"
+                >
+                  <LogOut size={16} />
+                  Log Out From All Devices
+                </button>
+              )}
             </div>
           </div>
         </div>

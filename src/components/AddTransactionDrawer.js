@@ -4,6 +4,7 @@
 import { useState, useEffect } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { X, Plus, Minus } from "lucide-react";
+import api from "@/lib/api";
 import { formatDateForInput } from "@/lib/utils"; // We will create this helper function
 
 // A custom segmented control for a nicer UI
@@ -58,9 +59,13 @@ export default function AddTransactionDrawer({
   const [error, setError] = useState("");
 
   const fetchCategories = () => {
-    fetch("/api/categories")
-      .then((res) => res.json())
-      .then((data) => setCategories(data));
+    api("/api/categories")
+      .then((res) => {
+        if (!res.ok) throw new Error("Failed to load categories");
+        return res.json();
+      })
+      .then((data) => setCategories(data))
+      .catch((err) => console.error("Failed to fetch categories:", err));
   };
 
   useEffect(() => {
@@ -100,7 +105,7 @@ export default function AddTransactionDrawer({
         return;
       }
       try {
-        const res = await fetch("/api/categories", {
+        const res = await api("/api/categories", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ name: newCategory, type }),
@@ -116,7 +121,7 @@ export default function AddTransactionDrawer({
     }
 
     try {
-      const res = await fetch("/api/transactions", {
+      const res = await api("/api/transactions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

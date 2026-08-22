@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { Plus, Trash2 } from "lucide-react";
+import api from "@/lib/api";
 import { defaultExpenseCategories, defaultIncomeCategories } from "@/lib/constants";
 
 export default function CategoriesPage() {
@@ -17,7 +18,8 @@ export default function CategoriesPage() {
 
   const fetchCategories = async () => {
     try {
-      const res = await fetch("/api/categories");
+      const res = await api("/api/categories");
+      if (!res.ok) throw new Error("Failed to fetch categories");
       const data = await res.json();
       setCategories(data);
     } catch (error) {
@@ -48,7 +50,7 @@ export default function CategoriesPage() {
   const handleDelete = async (id) => {
     setDeletingId(id);
     try {
-      const res = await fetch(`/api/categories/${id}`, { method: "DELETE" });
+      const res = await api(`/api/categories/${id}`, { method: "DELETE" });
       if (!res.ok) {
         const data = await res.json();
         setError(data.message || "Failed to delete category");
@@ -70,7 +72,7 @@ export default function CategoriesPage() {
     setSaving(true);
     setError("");
     try {
-      const res = await fetch("/api/categories", {
+      const res = await api("/api/categories", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: newName.trim(), type: newType }),

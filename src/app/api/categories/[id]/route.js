@@ -76,14 +76,16 @@ export async function DELETE(request, { params }) {
       );
     }
 
-    // Reassign all transactions using this category to "Miscellaneous"
+    // Reassign all transactions using this category to "Other" (an existing
+    // default for BOTH expense and income lists) so nothing lands in a
+    // category missing from every dropdown.
     await Transaction.updateMany(
       { userId: user._id, category: category.name },
-      { $set: { category: "Miscellaneous" } }
+      { $set: { category: "Other" } }
     );
 
     return NextResponse.json(
-      { message: "Category deleted successfully. Transactions reassigned to Miscellaneous." },
+      { message: "Category deleted successfully. Transactions reassigned to Other." },
       { status: 200 }
     );
   } catch (error) {

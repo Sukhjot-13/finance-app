@@ -8,6 +8,7 @@ import AddTransactionDrawer from "@/components/AddTransactionDrawer";
 import SimpleChart from "@/components/SimpleChart";
 import BudgetProgress from "@/components/BudgetProgress";
 import BudgetManager from "@/components/BudgetManager";
+import api from "@/lib/api";
 
 import { UserContext } from "@/app/(main)/layout"; // Import the UserContext
 
@@ -56,7 +57,7 @@ export default function DashboardPage() {
       // user's calendar regardless of where the server runs.
       const now = new Date();
       const start = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
-      const res = await fetch(
+      const res = await api(
         `/api/reports/dashboard?start=${encodeURIComponent(start)}`
       );
       if (!res.ok) throw new Error("Failed to fetch dashboard data");

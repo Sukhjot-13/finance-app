@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { X, Trash2, Wallet } from "lucide-react";
+import api from "@/lib/api";
 
 const OVERALL_CATEGORY = "__total__";
 
@@ -16,12 +17,19 @@ export default function BudgetManager({ isOpen, onClose, onSaved }) {
   useEffect(() => {
     if (!isOpen) return;
 
-    fetch("/api/categories")
-      .then((res) => res.json())
-      .then((data) => setCategories(data.expense || []));
+    api("/api/categories")
+      .then((res) => {
+        if (!res.ok) throw new Error("Failed to load categories");
+        return res.json();
+      })
+      .then((data) => setCategories(data.expense || []))
+      .catch(console.error);
 
-    fetch(`/api/budgets?month=${month}`)
-      .then((res) => res.json())
+    api(`/api/budgets?month=${month}`)
+      .then((res) => {
+        if (!res.ok) throw new Error("Failed to load budgets");
+        return res.json();
+      })
       .then((data) => {
         const map = {};
         data.forEach((b) => {
@@ -41,7 +49,7 @@ export default function BudgetManager({ isOpen, onClose, onSaved }) {
 
   const removeBudget = async (category) => {
     try {
-      const res = await fetch(
+      const res = await api(
         `/api/budgets?category=${encodeURIComponent(category)}&month=${month}`,
         { method: "DELETE" }
       );
@@ -61,17 +69,24 @@ export default function BudgetManager({ isOpen, onClose, onSaved }) {
   const handleSave = async () => {
     setSaving(true);
     try {
-      const promises = Object.entries(budgets).map(([category, amount]) => {
-        if (!amount || amount <= 0) return Promise.resolve();
-        return fetch("/api/budgets", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ category, amount, month }),
-        });
-      });
-      await Promise.all(promises);
-      onSaved?.();
-      onClose();
+      const entries = Object.entries(budgets).filter(
+        ([, amount]) => amount && amount > 0
+      );
+      const results = await Promise.all(
+        entries.map(([category, amount]) =>
+          api("/api/budgets", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ category, amount, month }),
+          })
+        )
+      );
+      if (results.some((res) => !res.ok)) {
+        console.error("One or more budgets failed to save");
+      } else {
+        onSaved?.();
+        onClose();
+      }
     } catch (error) {
       console.error("Failed to save budgets:", error);
     } finally {

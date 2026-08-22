@@ -3,6 +3,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import api from "@/lib/api";
 
 export default function WelcomePage() {
   const [accountName, setAccountName] = useState("");
@@ -15,7 +16,7 @@ export default function WelcomePage() {
     setLoading(true);
     setError("");
     try {
-      const res = await fetch("/api/user", {
+      const res = await api("/api/user", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ accountName }),
