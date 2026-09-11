@@ -11,16 +11,16 @@ export default function MainError({ error, reset }) {
   }, [error]);
 
   return (
-    <div className="text-center p-10 bg-red-50 rounded-lg">
-      <h2 className="text-lg font-semibold text-red-700 mb-2">
+    <div className="text-center p-10 bg-zinc-900 border border-rose-500/20 rounded-2xl max-w-md mx-auto shadow-xl">
+      <h2 className="text-lg font-bold text-rose-300 mb-2">
         Something went wrong
       </h2>
-      <p className="text-sm text-slate-600 mb-4">
+      <p className="text-sm text-zinc-400 mb-6">
         An unexpected error occurred while loading this page.
       </p>
       <button
         onClick={reset}
-        className="px-4 py-2 bg-indigo-600 text-white rounded-md text-sm font-medium hover:bg-indigo-700"
+        className="w-full px-4 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-zinc-950 rounded-xl text-sm font-semibold transition-colors shadow-lg shadow-emerald-500/20"
       >
         Try again
       </button>

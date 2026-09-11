@@ -1,23 +1,21 @@
+// src/app/(main)/profile/page.js
 "use client";
 
 import { useState, useEffect, useContext } from "react";
-import { Save, LogOut, AlertTriangle } from "lucide-react";
+import { Save, LogOut, AlertTriangle, User as UserIcon, Shield, CheckCircle2 } from "lucide-react";
 import api from "@/lib/api";
 import { UserContext } from "@/app/(main)/layout";
 
 export default function ProfilePage() {
-  // Shared context: updating via setUser propagates currency/name app-wide.
   const { user: contextUser, setUser } = useContext(UserContext);
   const [accountName, setAccountName] = useState("");
   const [currency, setCurrency] = useState("USD");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [status, setStatus] = useState(null); // { type: 'success' | 'error', text }
+  const [status, setStatus] = useState(null);
   const [confirmLogoutAll, setConfirmLogoutAll] = useState(false);
 
   useEffect(() => {
-    // Refresh from the server so this page reflects other-tab changes;
-    // definitive auth failures are handled inside api() itself.
     let cancelled = false;
     api("/api/user")
       .then((res) => {
@@ -55,12 +53,9 @@ export default function ProfilePage() {
           const data = await res.json();
           if (data?.message) message = data.message;
         } catch {
-          // non-JSON error body
         }
         throw new Error(message);
       }
-      // Propagate to every page sharing UserContext (header name,
-      // currency formatting) without a reload.
       setUser((prev) => ({ ...prev, accountName, currency }));
       setStatus({ type: "success", text: "Profile saved successfully." });
     } catch (error) {
@@ -82,8 +77,6 @@ export default function ProfilePage() {
     setConfirmLogoutAll(false);
     try {
       await api("/api/auth/logout-all", { method: "POST" });
-      // Cookies are cleared server-side; a hard navigation guarantees a
-      // clean slate even if client state was mid-flight.
       window.location.href = "/login";
     } catch (error) {
       console.error("Failed to log out from all devices", error);
@@ -96,30 +89,34 @@ export default function ProfilePage() {
 
   if (loading) {
     return (
-      <div className="flex justify-center items-center h-full">
-        <div className="animate-spin rounded-full h-16 w-16 border-t-2 border-b-2 border-indigo-500"></div>
+      <div className="flex flex-col justify-center items-center h-64 text-zinc-500">
+        <div className="w-10 h-10 rounded-full border-2 border-emerald-500 border-t-transparent animate-spin mb-3" />
+        <span className="text-xs font-mono">Loading profile...</span>
       </div>
     );
   }
 
   return (
     <div className="max-w-4xl mx-auto space-y-8">
-      {/* Inline status banner (replaces alert()) */}
+      {/* Inline status banner */}
       {status && (
         <div
-          className={`p-3 rounded-lg border text-sm flex items-center justify-between ${
+          className={`p-4 rounded-2xl border text-xs font-semibold flex items-center justify-between shadow-lg ${
             status.type === "success"
-              ? "bg-green-50 border-green-200 text-green-700"
-              : "bg-red-50 border-red-200 text-red-700"
+              ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-300"
+              : "bg-rose-500/10 border-rose-500/30 text-rose-300"
           }`}
         >
-          <span>{status.text}</span>
+          <div className="flex items-center gap-2.5">
+            {status.type === "success" ? <CheckCircle2 size={16} /> : <AlertTriangle size={16} />}
+            <span>{status.text}</span>
+          </div>
           <button
             onClick={() => setStatus(null)}
             className={`underline text-xs ${
               status.type === "success"
-                ? "text-green-600 hover:text-green-800"
-                : "text-red-500 hover:text-red-700"
+                ? "text-emerald-400 hover:text-emerald-200"
+                : "text-rose-400 hover:text-rose-200"
             }`}
           >
             Dismiss
@@ -127,16 +124,38 @@ export default function ProfilePage() {
         </div>
       )}
 
+      {/* User Header Profile Card */}
+      <div className="bg-zinc-900/80 border border-zinc-800/90 p-6 sm:p-8 rounded-2xl shadow-xl backdrop-blur-md flex items-center gap-5">
+        <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-emerald-500 to-teal-400 flex items-center justify-center text-zinc-950 font-bold text-2xl shadow-lg shadow-emerald-500/20 shrink-0">
+          {accountName ? accountName.charAt(0).toUpperCase() : <UserIcon size={28} />}
+        </div>
+        <div>
+          <h1 className="text-xl font-bold tracking-tight text-zinc-100">
+            {accountName || "Your Account"}
+          </h1>
+          <p className="text-xs text-zinc-400 font-mono mt-0.5">{contextUser?.email}</p>
+          <span className="inline-block mt-2 text-[10px] font-mono font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+            Verified Account
+          </span>
+        </div>
+      </div>
+
       {/* Profile Settings Card */}
-      <div className="bg-white p-8 rounded-xl shadow-sm">
-        <h2 className="text-2xl font-bold text-slate-800 mb-6">
-          Profile Settings
-        </h2>
-        <form onSubmit={handleSave} className="space-y-6">
+      <div className="bg-zinc-900/80 border border-zinc-800/90 p-6 sm:p-8 rounded-2xl shadow-xl backdrop-blur-md space-y-6">
+        <div>
+          <h2 className="text-base font-bold text-zinc-100 tracking-tight">
+            Account Preferences
+          </h2>
+          <p className="text-xs text-zinc-400 mt-0.5">
+            Update your public name and default reporting currency.
+          </p>
+        </div>
+
+        <form onSubmit={handleSave} className="space-y-5">
           <div>
             <label
               htmlFor="accountName"
-              className="block text-sm font-medium text-slate-700"
+              className="block text-xs font-semibold text-zinc-400 uppercase tracking-wider font-mono mb-2"
             >
               Account Name
             </label>
@@ -146,14 +165,15 @@ export default function ProfilePage() {
               value={accountName}
               onChange={(e) => setAccountName(e.target.value)}
               maxLength={60}
-              className="mt-1 block w-full px-3 py-2 border border-slate-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+              placeholder="e.g., Personal Finances"
+              className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2.5 text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/40 transition-all"
             />
           </div>
 
           <div>
             <label
               htmlFor="email"
-              className="block text-sm font-medium text-slate-700"
+              className="block text-xs font-semibold text-zinc-400 uppercase tracking-wider font-mono mb-2"
             >
               Email Address
             </label>
@@ -162,13 +182,17 @@ export default function ProfilePage() {
               type="email"
               value={contextUser?.email || ""}
               disabled
-              className="mt-1 block w-full px-3 py-2 border border-slate-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 bg-slate-50 text-slate-500"
+              className="w-full bg-zinc-950/40 border border-zinc-800/60 rounded-xl px-4 py-2.5 text-sm text-zinc-500 cursor-not-allowed font-mono"
             />
+            <span className="block text-[11px] text-zinc-500 mt-1">
+              Email is managed by OTP authentication and cannot be edited.
+            </span>
           </div>
+
           <div>
             <label
               htmlFor="currency"
-              className="block text-sm font-medium text-slate-700"
+              className="block text-xs font-semibold text-zinc-400 uppercase tracking-wider font-mono mb-2"
             >
               Preferred Currency
             </label>
@@ -176,19 +200,20 @@ export default function ProfilePage() {
               id="currency"
               value={currency}
               onChange={(e) => setCurrency(e.target.value)}
-              className="mt-1 block w-full px-3 py-2 border border-slate-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 bg-white"
+              className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2.5 text-sm text-zinc-100 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/40 cursor-pointer"
             >
-              <option value="USD">USD ($) - United States Dollar</option>
-              <option value="INR">INR (₹) - Indian Rupee</option>
+              <option value="USD" className="bg-zinc-900 text-zinc-100">USD ($) - United States Dollar</option>
+              <option value="INR" className="bg-zinc-900 text-zinc-100">INR (₹) - Indian Rupee</option>
             </select>
           </div>
-          <div className="flex justify-end">
+
+          <div className="flex justify-end pt-2">
             <button
               type="submit"
               disabled={saving}
-              className="flex items-center gap-2 bg-indigo-600 text-white font-semibold py-2 px-4 rounded-lg shadow-md hover:bg-indigo-700 transition-colors disabled:bg-indigo-400"
+              className="flex items-center gap-2 bg-gradient-to-r from-emerald-400 to-teal-500 text-zinc-950 font-bold py-2.5 px-6 rounded-xl shadow-lg shadow-emerald-500/20 hover:from-emerald-300 hover:to-teal-400 transition-all disabled:opacity-50 active:scale-[0.98] text-xs"
             >
-              <Save size={18} />
+              <Save size={15} />
               {saving ? "Saving..." : "Save Changes"}
             </button>
           </div>
@@ -196,39 +221,41 @@ export default function ProfilePage() {
       </div>
 
       {/* Security Settings Card */}
-      <div className="bg-white p-8 rounded-xl shadow-sm">
-        <h2 className="text-2xl font-bold text-slate-800 mb-6">Security</h2>
-        <div className="mt-6 border-t pt-6">
-          <h3 className="text-lg font-medium text-slate-700">Danger Zone</h3>
-          <div className="mt-4 p-4 border border-red-300 bg-red-50 rounded-lg flex items-start gap-4">
+      <div className="bg-zinc-900/80 border border-zinc-800/90 p-6 sm:p-8 rounded-2xl shadow-xl backdrop-blur-md space-y-6">
+        <div className="flex items-center gap-2.5">
+          <Shield size={18} className="text-rose-400" />
+          <h2 className="text-base font-bold text-zinc-100 tracking-tight">Security & Sessions</h2>
+        </div>
+
+        <div className="border-t border-zinc-800/80 pt-6">
+          <div className="p-5 border border-rose-500/20 bg-rose-500/5 rounded-2xl flex items-start gap-4">
             <AlertTriangle
-              className="text-red-500 flex-shrink-0 mt-1"
-              size={24}
+              className="text-rose-400 shrink-0 mt-0.5"
+              size={22}
             />
-            <div>
-              <h4 className="font-semibold text-red-800">
+            <div className="space-y-1.5 flex-1">
+              <h4 className="text-sm font-bold text-rose-300">
                 Log Out From All Devices
               </h4>
-              <p className="text-sm text-red-700 mt-1">
-                This will immediately log you out of FinTrack on all of your
-                computers, phones, and tablets. You will need to sign in again
-                everywhere.
+              <p className="text-xs text-zinc-400 leading-relaxed">
+                This will immediately invalidate active refresh tokens across all of your
+                computers, phones, and tablets. You will need to sign in again everywhere.
               </p>
               {confirmLogoutAll ? (
-                <div className="mt-3 flex items-center gap-2">
-                  <span className="text-sm font-medium text-red-700">
+                <div className="mt-4 p-3 bg-zinc-950/80 rounded-xl border border-rose-500/30 flex items-center gap-3 flex-wrap">
+                  <span className="text-xs font-semibold text-rose-300">
                     Are you sure?
                   </span>
                   <button
                     onClick={handleLogoutAll}
-                    className="flex items-center gap-2 bg-red-600 text-white font-semibold py-2 px-3 rounded-lg shadow-sm hover:bg-red-700 transition-colors text-sm"
+                    className="flex items-center gap-2 bg-rose-600 hover:bg-rose-500 text-white font-bold py-2 px-3.5 rounded-xl shadow-md transition-colors text-xs"
                   >
-                    <LogOut size={16} />
+                    <LogOut size={14} />
                     Yes, Log Out Everywhere
                   </button>
                   <button
                     onClick={() => setConfirmLogoutAll(false)}
-                    className="px-3 py-2 text-sm text-slate-600 hover:text-slate-800"
+                    className="px-3 py-2 text-xs font-semibold text-zinc-400 hover:text-zinc-200"
                   >
                     Cancel
                   </button>
@@ -236,9 +263,9 @@ export default function ProfilePage() {
               ) : (
                 <button
                   onClick={handleLogoutAll}
-                  className="mt-3 flex items-center gap-2 bg-red-600 text-white font-semibold py-2 px-3 rounded-lg shadow-sm hover:bg-red-700 transition-colors text-sm"
+                  className="mt-3 inline-flex items-center gap-2 bg-rose-600/90 hover:bg-rose-600 text-white font-bold py-2 px-4 rounded-xl shadow-md transition-colors text-xs"
                 >
-                  <LogOut size={16} />
+                  <LogOut size={14} />
                   Log Out From All Devices
                 </button>
               )}

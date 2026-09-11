@@ -3,7 +3,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { PiggyBank } from "lucide-react";
+import { PiggyBank, ArrowRight, Mail, KeyRound, Sparkles } from "lucide-react";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -22,11 +22,6 @@ export default function LoginPage() {
     return () => clearInterval(timer);
   }, [resendIn]);
 
-  // Check if already logged in and redirect. A 401 here usually means only
-  // the SHORT-LIVED access token expired — the refresh cookie is still valid
-  // for 30 days, so attempt one silent refresh before giving up and showing
-  // the OTP form. Without this, returning users get bounced into a full
-  // re-login every time the 15-minute access cookie lapses.
   useEffect(() => {
     const checkSession = async () => {
       try {
@@ -44,7 +39,6 @@ export default function LoginPage() {
           return;
         }
       } catch {
-        // Network trouble — fall through and stay on login
       }
       setCheckingSession(false);
     };
@@ -53,8 +47,10 @@ export default function LoginPage() {
 
   if (checkingSession) {
     return (
-      <div className="flex items-center justify-center min-h-screen bg-slate-50">
-        <PiggyBank className="w-12 h-12 text-indigo-600 animate-bounce" />
+      <div className="flex flex-col items-center justify-center min-h-screen bg-zinc-950 text-zinc-100">
+        <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-emerald-500 to-teal-400 flex items-center justify-center text-zinc-950 shadow-lg shadow-emerald-500/20 animate-pulse">
+          <PiggyBank className="w-7 h-7" />
+        </div>
       </div>
     );
   }
@@ -69,7 +65,6 @@ export default function LoginPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email }),
       });
-      // Surface the server's specific message (rate limit, invalid email…)
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         throw new Error(data.message || "Failed to send OTP. Please try again.");
@@ -131,55 +126,67 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="flex items-center justify-center min-h-screen bg-slate-50">
-      <div className="w-full max-w-md p-8 space-y-8">
+    <div className="flex items-center justify-center min-h-screen bg-zinc-950 p-4 relative overflow-hidden text-zinc-100 selection:bg-emerald-500/30 selection:text-emerald-300">
+      {/* Background ambient lighting */}
+      <div className="absolute -top-40 left-1/2 -translate-x-1/2 w-[500px] h-[500px] bg-emerald-500/10 blur-[130px] rounded-full pointer-events-none" />
+      <div className="absolute -bottom-40 right-10 w-[400px] h-[400px] bg-teal-500/10 blur-[120px] rounded-full pointer-events-none" />
+
+      <div className="w-full max-w-md space-y-6 relative z-10">
         <div className="text-center">
-          <PiggyBank size={48} className="mx-auto text-indigo-600" />
-          <h1 className="mt-4 text-3xl font-bold text-slate-900">
+          <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-emerald-400 to-teal-500 flex items-center justify-center text-zinc-950 mx-auto shadow-xl shadow-emerald-500/20 mb-4">
+            <PiggyBank size={30} className="stroke-[2.5]" />
+          </div>
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-zinc-100">
             Sign In to FinTrack
           </h1>
-          <p className="mt-2 text-slate-600">
+          <p className="mt-2 text-xs sm:text-sm text-zinc-400">
             {step === 1
               ? "Enter your email to get a login code."
               : `We sent a code to ${email}.`}
           </p>
         </div>
 
-        <div className="bg-white p-8 rounded-xl shadow-md space-y-6">
+        <div className="bg-zinc-900/85 border border-zinc-800/90 p-6 sm:p-8 rounded-3xl shadow-2xl backdrop-blur-xl space-y-5 relative overflow-hidden">
+          {/* Subtle accent bar on top of the card */}
+          <div className="absolute top-0 inset-x-0 h-1 bg-gradient-to-r from-emerald-500 via-teal-400 to-transparent" />
+
           {error && (
-            <p className="text-sm text-center text-red-600 bg-red-100 p-3 rounded-md">
+            <div className="text-xs text-center text-rose-300 bg-rose-500/10 border border-rose-500/20 p-3 rounded-xl font-medium">
               {error}
-            </p>
+            </div>
           )}
 
           {step === 1 ? (
-            <form className="space-y-6" onSubmit={handleSendOtp}>
+            <form className="space-y-4" onSubmit={handleSendOtp}>
               <div>
                 <label htmlFor="email" className="sr-only">
                   Email address
                 </label>
-                <input
-                  id="email"
-                  name="email"
-                  type="email"
-                  autoComplete="email"
-                  required
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-md shadow-sm placeholder-slate-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-                  placeholder="Email address"
-                />
+                <div className="relative">
+                  <Mail size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-500" />
+                  <input
+                    id="email"
+                    name="email"
+                    type="email"
+                    autoComplete="email"
+                    required
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    className="w-full pl-10 pr-4 py-3 bg-zinc-950 border border-zinc-800 rounded-xl text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/40 transition-all shadow-inner"
+                    placeholder="Email address"
+                  />
+                </div>
               </div>
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:bg-indigo-400"
+                className="w-full flex justify-center items-center py-3 px-4 rounded-xl text-sm font-bold text-zinc-950 bg-gradient-to-r from-emerald-400 to-teal-500 hover:from-emerald-300 hover:to-teal-400 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-emerald-400 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-emerald-500/20 active:scale-[0.98] transition-all"
               >
                 {loading ? "Sending..." : "Send Code"}
               </button>
             </form>
           ) : (
-            <form className="space-y-6" onSubmit={handleVerifyOtp} id="otp-form">
+            <form className="space-y-5" onSubmit={handleVerifyOtp} id="otp-form">
               <div>
                 <label htmlFor="otp" className="sr-only">
                   One-Time Password
@@ -214,37 +221,39 @@ export default function LoginPage() {
                       }
                     }
                   }}
-                  className="w-full text-center tracking-[0.5em] sm:tracking-[1em] px-3 py-2 border border-slate-300 rounded-md shadow-sm placeholder-slate-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                  className="w-full text-center tracking-[0.5em] sm:tracking-[0.8em] py-3.5 px-4 bg-zinc-950 border border-zinc-800 rounded-xl text-2xl font-mono font-bold text-emerald-400 placeholder-zinc-700 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/40 transition-all shadow-inner"
                   placeholder="______"
                 />
               </div>
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:bg-indigo-400"
+                className="w-full flex justify-center items-center py-3 px-4 rounded-xl text-sm font-bold text-zinc-950 bg-gradient-to-r from-emerald-400 to-teal-500 hover:from-emerald-300 hover:to-teal-400 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-emerald-400 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-emerald-500/20 active:scale-[0.98] transition-all"
               >
                 {loading ? "Verifying..." : "Sign In"}
               </button>
-              <button
-                type="button"
-                onClick={handleResend}
-                disabled={resendIn > 0 || loading}
-                className="w-full text-sm text-center text-indigo-600 hover:text-indigo-500 disabled:text-slate-400 disabled:cursor-not-allowed"
-              >
-                {resendIn > 0 ? `Resend code in ${resendIn}s` : "Resend code"}
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setStep(1);
-                  setError("");
-                  setOtp("");
-                  setResendIn(0);
-                }}
-                className="w-full text-sm text-center text-slate-500 hover:text-slate-700"
-              >
-                Use a different email
-              </button>
+              <div className="space-y-2 pt-1">
+                <button
+                  type="button"
+                  onClick={handleResend}
+                  disabled={resendIn > 0 || loading}
+                  className="w-full text-xs font-semibold text-center text-emerald-400 hover:text-emerald-300 disabled:text-zinc-600 disabled:cursor-not-allowed transition-colors"
+                >
+                  {resendIn > 0 ? `Resend code in ${resendIn}s` : "Resend code"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setStep(1);
+                    setError("");
+                    setOtp("");
+                    setResendIn(0);
+                  }}
+                  className="w-full text-xs text-center text-zinc-500 hover:text-zinc-300 transition-colors"
+                >
+                  Use a different email
+                </button>
+              </div>
             </form>
           )}
         </div>

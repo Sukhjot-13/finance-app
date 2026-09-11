@@ -31,5 +31,5 @@ Export transactions or reports as CSV. Relatively straightforward since the data
 ### Recurring transactions
 Monthly bills/subscriptions that auto-create transactions. More complex — would need a cron job or check-on-login pattern.
 
-### Dark mode
-UI is all Tailwind's default slate colors. A dark mode toggle with Tailwind v4's `@dark` variant would give it a modern feel.
+### Dark Fintech UI Overhaul (Completed 2026-09-11)
+Replaced the generic light gray/slate template ("AI slop") with an ultra-sleek, modern fintech dark theme inspired by Linear and Copilot Money. Includes deep obsidian surfaces (`bg-zinc-950`), glowing emerald/teal accent hierarchy, glassmorphism, tabular numerals, refined segmented controls, quick date presets in reports, and streamlined modal dialogues. All 195 automated tests preserved green.

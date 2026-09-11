@@ -33,8 +33,10 @@ export default function SessionGate() {
   }, [router]);
 
   return (
-    <div className="flex items-center justify-center min-h-screen bg-slate-50">
-      <PiggyBank className="w-12 h-12 text-indigo-600 animate-bounce" />
+    <div className="flex flex-col items-center justify-center min-h-screen bg-zinc-950 text-zinc-100">
+      <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-emerald-500 to-teal-400 flex items-center justify-center text-zinc-950 shadow-lg shadow-emerald-500/20 animate-pulse">
+        <PiggyBank className="w-7 h-7" />
+      </div>
     </div>
   );
 }

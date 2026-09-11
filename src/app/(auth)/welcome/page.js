@@ -3,6 +3,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { PiggyBank, Sparkles } from "lucide-react";
 import api from "@/lib/api";
 
 export default function WelcomePage() {
@@ -11,8 +12,6 @@ export default function WelcomePage() {
   const [error, setError] = useState("");
   const router = useRouter();
 
-  // Marks onboarding complete on the server so this screen is shown once —
-  // skipping without it would bounce the user back here on every login.
   const completeOnboarding = async () => {
     try {
       await api("/api/user", {
@@ -21,7 +20,6 @@ export default function WelcomePage() {
         body: JSON.stringify({ onboarded: true }),
       });
     } catch {
-      // Non-fatal: worst case the user sees this screen one more time.
     }
     router.push("/dashboard");
   };
@@ -49,62 +47,70 @@ export default function WelcomePage() {
   };
 
   const skip = () => {
-    // No name is fine — dashboard works without one.
     completeOnboarding();
   };
 
   return (
-    <div className="flex items-center justify-center min-h-screen bg-gray-50">
-      <div className="w-full max-w-md p-8 space-y-8 bg-white rounded-lg shadow-md">
+    <div className="flex items-center justify-center min-h-screen bg-zinc-950 p-4 relative overflow-hidden text-zinc-100 selection:bg-emerald-500/30 selection:text-emerald-300">
+      <div className="absolute -top-40 left-1/2 -translate-x-1/2 w-[500px] h-[500px] bg-emerald-500/10 blur-[130px] rounded-full pointer-events-none" />
+
+      <div className="w-full max-w-md space-y-6 relative z-10">
         <div className="text-center">
-          <h1 className="text-3xl font-bold text-gray-900">Welcome!</h1>
-          <p className="mt-2 text-gray-600">
+          <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-emerald-400 to-teal-500 flex items-center justify-center text-zinc-950 mx-auto shadow-xl shadow-emerald-500/20 mb-4">
+            <Sparkles size={28} />
+          </div>
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-zinc-100">Welcome!</h1>
+          <p className="mt-2 text-xs sm:text-sm text-zinc-400">
             {`Let's get your account set up. What should we call it?`}
           </p>
         </div>
 
-        {error && (
-          <p className="text-sm text-center text-red-600 bg-red-100 p-3 rounded-md">
-            {error}
-          </p>
-        )}
+        <div className="bg-zinc-900/85 border border-zinc-800/90 p-6 sm:p-8 rounded-3xl shadow-2xl backdrop-blur-xl space-y-5 relative overflow-hidden">
+          <div className="absolute top-0 inset-x-0 h-1 bg-gradient-to-r from-emerald-500 via-teal-400 to-transparent" />
 
-        <form className="space-y-6" onSubmit={handleSubmit}>
-          <div>
-            <label
-              htmlFor="accountName"
-              className="block text-sm font-medium text-gray-700"
+          {error && (
+            <div className="text-xs text-center text-rose-300 bg-rose-500/10 border border-rose-500/20 p-3 rounded-xl font-medium">
+              {error}
+            </div>
+          )}
+
+          <form className="space-y-5" onSubmit={handleSubmit}>
+            <div>
+              <label
+                htmlFor="accountName"
+                className="block text-xs font-semibold text-zinc-400 uppercase tracking-wider font-mono mb-2"
+              >
+                Account Name
+              </label>
+              <input
+                id="accountName"
+                name="accountName"
+                type="text"
+                required
+                maxLength={60}
+                value={accountName}
+                onChange={(e) => setAccountName(e.target.value)}
+                className="w-full px-4 py-3 bg-zinc-950 border border-zinc-800 rounded-xl text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/40 transition-all shadow-inner"
+                placeholder="e.g., My Personal Finances"
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full flex justify-center items-center py-3.5 px-4 rounded-xl text-sm font-bold text-zinc-950 bg-gradient-to-r from-emerald-400 to-teal-500 hover:from-emerald-300 hover:to-teal-400 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-emerald-400 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-emerald-500/20 active:scale-[0.98] transition-all"
             >
-              Account Name
-            </label>
-            <input
-              id="accountName"
-              name="accountName"
-              type="text"
-              required
-              maxLength={60}
-              value={accountName}
-              onChange={(e) => setAccountName(e.target.value)}
-              className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-              placeholder="e.g., My Personal Finances"
-            />
-          </div>
+              {loading ? "Saving..." : "Continue to Dashboard"}
+            </button>
+          </form>
           <button
-            type="submit"
+            type="button"
+            onClick={skip}
             disabled={loading}
-            className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:bg-indigo-400"
+            className="w-full text-xs text-center text-zinc-500 hover:text-zinc-300 transition-colors"
           >
-            {loading ? "Saving..." : "Continue to Dashboard"}
+            Skip for now
           </button>
-        </form>
-        <button
-          type="button"
-          onClick={skip}
-          disabled={loading}
-          className="w-full text-sm text-center text-slate-500 hover:text-slate-700"
-        >
-          Skip for now
-        </button>
+        </div>
       </div>
     </div>
   );

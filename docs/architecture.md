@@ -66,7 +66,7 @@ A Next.js 16 personal finance tracking application with OTP-based authentication
 - **`src/app/session-gate.js`** *(new)* - Client-side fallback for the root page.
   - `SessionGate()` - Rendered when server-side `verifyAuth()` fails. Attempts ONE silent `POST /api/auth/refresh`: success → `/dashboard`, failure/network error → `/login`. Shows the bouncing-pig loading screen while deciding. Prevents returning users from being forced into OTP re-logins when only the short-lived access token lapsed.
 
-- **`src/app/globals.css`** - Global styles. Imports Tailwind CSS v4 (`@import "tailwindcss"`). Defines `@theme` block (currently commented out). Sets `box-sizing: border-box` globally.
+- **`src/app/globals.css`** - Global styles. Imports Tailwind CSS v4 (`@import "tailwindcss"`). Configures modern dark fintech design system: custom dark scrollbar, autofill dark styles, glassmorphic panel utilities (`.glass-panel`, `.glass-panel-subtle`), glow utilities (`.glow-emerald`), and antialiased typography defaults.
 
 #### Middleware (Proxy)
 
@@ -317,6 +317,6 @@ Run 3 times — one for each of `ACCESS_TOKEN_SECRET`, `REFRESH_TOKEN_SECRET`, a
 
 ### Tests
 ```bash
-npm test        # vitest — runs ALL 191 tests in one go via test/run-all.test.js
+npm test        # vitest — runs ALL 195 tests in one go via test/run-all.test.js
 npm run lint    # eslint . (clean)
 ```
