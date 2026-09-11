@@ -49,9 +49,15 @@ export async function PUT(request, { params }) {
     return sendError("Transaction not found", 404);
   }
 
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return sendError("Invalid request body", 400);
+  }
+
   try {
     await dbConnect();
-    const body = await request.json();
     const { type, amount, category, date, description, excludeFromBudget } = body;
 
     // Store the date exactly as the client sent it (see POST /api/transactions
@@ -81,6 +87,9 @@ export async function PUT(request, { params }) {
     return sendSuccess(updatedTransaction);
   } catch (err) {
     console.error(err);
+    if (err.name === "ValidationError") {
+      return sendError(err.message, 400);
+    }
     return sendError("Server error", 500);
   }
 }

@@ -242,6 +242,21 @@ describe("/api/transactions/[id]", () => {
           userId: "64b64b64b64b64b64b64b64b",
         });
       });
+
+      it("maps ValidationError to HTTP 400", async () => {
+        const valErr = new Error("Amount must be a positive number");
+        valErr.name = "ValidationError";
+        T().findOneAndUpdate.mockRejectedValueOnce(valErr);
+        const { PUT } = await loadIdRoute();
+        const res = await PUT(
+          req("http://localhost/api/t/" + VALID, "PUT", { amount: -10 }),
+          { params: Promise.resolve({ id: VALID }) }
+        );
+        expect(res.status).toBe(400);
+        await expect(res.json()).resolves.toMatchObject({
+          error: "Amount must be a positive number",
+        });
+      });
     });
 
     describe("DELETE", () => {

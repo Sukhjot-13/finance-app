@@ -229,6 +229,17 @@ describe("POST /api/auth/otp/verify", () => {
     });
   });
 
+  it("locks out by IP after repeated failures from that IP (uniform 429)", async () => {
+    RL().aggregate
+      .mockResolvedValueOnce([]) // email hits: 0
+      .mockResolvedValueOnce([{ n: 25 }]); // ip hits: 25
+    const { res } = await verifyWith({ email: "target@b.c", otp: "000000" });
+    expect(res.status).toBe(429);
+    await expect(res.json()).resolves.toMatchObject({
+      error: /Too many failed attempts/,
+    });
+  });
+
   it("gives one UNIFORM failure message for unknown emails (timing-equalized)", async () => {
     U().findOne.mockResolvedValueOnce(null);
     const { res } = await verifyWith({ email: "ghost@nowhere.com", otp: "111111" });

@@ -84,6 +84,14 @@ describe("PUT /api/user", () => {
     expect(res.status).toBe(400);
   });
 
+  it("allows clearing accountName to null when empty string is provided", async () => {
+    const { PUT } = await loadRoute();
+    const res = await PUT(req("PUT", { accountName: "" }));
+    expect(res.status).toBe(200);
+    const [, update] = globalThis.__models.user.findByIdAndUpdate.mock.calls[0];
+    expect(update.$set.accountName).toBeNull();
+  });
+
   it("auto-completes onboarding when a non-empty name is saved (B3)", async () => {
     const { PUT } = await loadRoute();
 

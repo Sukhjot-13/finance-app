@@ -62,7 +62,7 @@ export function EditTransactionModal({ transaction, onClose, onSave }) {
     setModalError("");
     let finalCategory = formData.category;
     if (isAddingNewCategory) {
-      if (!newCategory) {
+      if (!newCategory.trim()) {
         setModalError("Please enter a name for the new category.");
         return;
       }
@@ -150,7 +150,12 @@ export function EditTransactionModal({ transaction, onClose, onSave }) {
                     key={t}
                     type="button"
                     onClick={() => {
-                      setFormData((prev) => ({ ...prev, type: t, category: "" }));
+                      setFormData((prev) => ({
+                        ...prev,
+                        type: t,
+                        category: "",
+                        ...(t === "income" ? { excludeFromBudget: false } : {}),
+                      }));
                       setIsAddingNewCategory(false);
                     }}
                     className={`flex-1 px-3 py-2 rounded-md text-sm font-medium border capitalize ${

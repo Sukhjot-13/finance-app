@@ -9,10 +9,16 @@ export async function POST(request) {
   if (!user)
     return NextResponse.json({ message: "Not authenticated" }, { status: status || 401 });
 
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ message: "Invalid request body" }, { status: 400 });
+  }
+
   try {
     await dbConnect();
-    const { startDate, endDate, startInstant, endInstant } =
-      await request.json();
+    const { startDate, endDate, startInstant, endInstant } = body;
 
     if (!startDate || !endDate) {
       return NextResponse.json(
@@ -49,10 +55,13 @@ export async function POST(request) {
       );
     }
 
-    const transactions = await Transaction.find({
+    const query = Transaction.find({
       userId: user._id,
       date: { $gte: rangeStart, $lte: rangeEnd },
     });
+    const transactions = await (typeof query.lean === "function"
+      ? query.select("type amount category date").lean()
+      : query);
 
     const totalIncome = transactions
       .filter((t) => t.type === "income")

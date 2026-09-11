@@ -11,6 +11,7 @@ const { default: Transaction } = await vi.importActual(
 );
 const { default: Category } = await vi.importActual("@/models/category.model");
 const { default: Budget } = await vi.importActual("@/models/budget.model");
+const { default: User } = await vi.importActual("@/models/user.model");
 
 describe("Transaction schema", () => {
   it("rejects a non-positive amount via validators", () => {
@@ -126,5 +127,16 @@ describe("User model OTP hashing hook", () => {
     };
     await expect(doc.compareOtp("123456")).resolves.toBe(true);
     await expect(doc.compareOtp("000000")).resolves.toBe(false);
+  });
+
+  it("pre-save hook preserves existing bcrypt hash without double-hashing", async () => {
+    const existingHash = "$2b$10$abcdefghijklmnopqrstuv1234567890abcdefghijklmnopqrstu";
+    const u = new User({ email: "a@b.com", otp: existingHash });
+    const middleware = User.schema.s.hooks._pres.get("save");
+    expect(middleware).toBeDefined();
+    await new Promise((resolve) => {
+      middleware[0].fn.call(u, resolve);
+    });
+    expect(u.otp).toBe(existingHash);
   });
 });

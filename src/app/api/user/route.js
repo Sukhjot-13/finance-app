@@ -32,9 +32,15 @@ export async function PUT(req) {
         return NextResponse.json({ message: "Unauthorized" }, { status: status || 401 });
     }
 
+    let body;
+    try {
+        body = await req.json();
+    } catch {
+        return NextResponse.json({ message: "Invalid request body" }, { status: 400 });
+    }
+
     try {
         await dbConnect();
-        const body = await req.json();
         const accountName =
           typeof body.accountName === "string" ? body.accountName.trim() : undefined;
         const currency = body.currency;
@@ -49,7 +55,7 @@ export async function PUT(req) {
 
         // Validate currency explicitly so bad input is a 400, not a
         // mongoose enum failure surfacing as an opaque 500.
-        if (currency !== undefined && ![null, "", "USD", "INR"].includes(currency)) {
+        if (currency !== undefined && !["USD", "INR"].includes(currency)) {
             return NextResponse.json(
               { message: "Currency must be USD or INR" },
               { status: 400 }
@@ -63,8 +69,8 @@ export async function PUT(req) {
           (typeof body.accountName === "string" && Boolean(body.accountName.trim()));
 
         const fieldsToUpdate = {};
-        if (accountName) fieldsToUpdate.accountName = accountName;
-        if (currency) fieldsToUpdate.currency = currency;
+        if (accountName !== undefined) fieldsToUpdate.accountName = accountName || null;
+        if (currency !== undefined) fieldsToUpdate.currency = currency;
         if (wantsOnboard) fieldsToUpdate.onboarded = true;
 
         if (Object.keys(fieldsToUpdate).length === 0) {

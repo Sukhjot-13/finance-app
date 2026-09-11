@@ -18,6 +18,7 @@ import RateLimit from "@/models/ratelimit.model";
  */
 export async function recordHit(key, windowMs) {
   try {
+    await dbConnect();
     const now = new Date();
     await RateLimit.updateOne(
       { key },
@@ -37,6 +38,7 @@ export async function recordHit(key, windowMs) {
  */
 export async function countRecentHits(key, windowMs) {
   try {
+    await dbConnect();
     const cutoff = new Date(Date.now() - windowMs);
     const result = await RateLimit.aggregate([
       { $match: { key } },
@@ -67,6 +69,7 @@ export async function countRecentHits(key, windowMs) {
  */
 export async function popLastHit(key) {
   try {
+    await dbConnect();
     await RateLimit.updateOne({ key }, { $pop: { hits: 1 } });
   } catch (error) {
     console.error("rate-limit popLastHit error:", error.message);
@@ -78,6 +81,7 @@ export async function popLastHit(key) {
  */
 export async function resetKey(key) {
   try {
+    await dbConnect();
     await RateLimit.deleteOne({ key });
   } catch (error) {
     console.error("rate-limit resetKey error:", error.message);

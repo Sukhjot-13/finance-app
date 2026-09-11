@@ -15,8 +15,17 @@ import { recordHit, countRecentHits, resetKey } from "@/lib/rate-limit";
 // Brute-force protection, backed by MongoDB so it is shared across
 // instances and survives restarts. 5 failed attempts per email inside a
 // sliding 15-minute window locks that email out for the remainder of it.
+// Additionally, 25 failed attempts per IP prevents distributed spraying.
 const VERIFY_WINDOW_MS = 15 * 60 * 1000;
 const VERIFY_MAX_ATTEMPTS = 5;
+const VERIFY_IP_WINDOW_MS = 15 * 60 * 1000;
+const VERIFY_IP_MAX_ATTEMPTS = 25;
+
+function getClientIp(request) {
+  const forwarded = request.headers.get("x-forwarded-for");
+  if (forwarded) return forwarded.split(",")[0].trim();
+  return request.headers.get("x-real-ip") || "unknown";
+}
 
 // bcrypt hash of a throwaway string. Compared against when no real OTP
 // exists so the endpoint's timing is identical either way.
@@ -55,11 +64,15 @@ export async function POST(req) {
     await dbConnect();
 
     const attemptKey = `otp-verify:${String(email).trim().toLowerCase()}`;
-    const recentFailures = await countRecentHits(attemptKey, VERIFY_WINDOW_MS);
+    const ipKey = `otp-verify-ip:${getClientIp(req)}`;
+    const [recentFailures, recentIpFailures] = await Promise.all([
+      countRecentHits(attemptKey, VERIFY_WINDOW_MS),
+      countRecentHits(ipKey, VERIFY_IP_WINDOW_MS),
+    ]);
 
     // Reject cheaply while locked out — identical message as any other
     // failure so attackers learn nothing extra.
-    if (recentFailures >= VERIFY_MAX_ATTEMPTS) {
+    if (recentFailures >= VERIFY_MAX_ATTEMPTS || recentIpFailures >= VERIFY_IP_MAX_ATTEMPTS) {
       return sendError(
         "Too many failed attempts. Please try again later.",
         429
@@ -88,7 +101,10 @@ export async function POST(req) {
     }
 
     if (failureMessage) {
-      await recordHit(attemptKey, VERIFY_WINDOW_MS);
+      await Promise.all([
+        recordHit(attemptKey, VERIFY_WINDOW_MS),
+        recordHit(ipKey, VERIFY_IP_WINDOW_MS),
+      ]);
       return sendError(failureMessage, 400);
     }
 

@@ -246,12 +246,14 @@ export default function BudgetManager({ isOpen, onClose, onSaved }) {
                       </div>
                       <div className="flex items-center gap-3">
                         <input
+                          id="overall-budget-input"
                           type="number"
                           step="0.01"
-                          min="0"
+                          min="1"
                           placeholder="Total spending limit"
                           value={overallBudget ?? ""}
                           onChange={(e) => setBudget(OVERALL_CATEGORY, e.target.value)}
+                          aria-label="Overall monthly budget"
                           className="flex-1 px-3 py-2 border border-indigo-300 rounded-md text-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
                         />
                         {(overallBudget && overallBudget !== "") && (
@@ -316,7 +318,7 @@ export default function BudgetManager({ isOpen, onClose, onSaved }) {
                           <input
                             type="number"
                             step="0.01"
-                            min="0"
+                            min="1"
                             placeholder="Amount"
                             value={budgets[cat] ?? ""}
                             onChange={(e) => setBudget(cat, e.target.value)}

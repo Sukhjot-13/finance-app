@@ -79,6 +79,7 @@ export default function ReportsPage() {
 
   const chartOptions = {
     responsive: true,
+    maintainAspectRatio: false,
     plugins: {
       legend: { display: false },
       title: { display: true, text: "Spending by Category" },

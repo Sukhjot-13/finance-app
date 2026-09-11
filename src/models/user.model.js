@@ -59,9 +59,9 @@ const UserSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-// Hash OTP before saving
+// Hash OTP before saving (skip if already a bcrypt hash to prevent double-hashing on restore)
 UserSchema.pre("save", async function (next) {
-  if (this.isModified("otp") && this.otp) {
+  if (this.isModified("otp") && this.otp && !/^\$2[aby]\$\d+\$/.test(this.otp)) {
     const salt = await bcrypt.genSalt(10);
     this.otp = await bcrypt.hash(this.otp, salt);
   }

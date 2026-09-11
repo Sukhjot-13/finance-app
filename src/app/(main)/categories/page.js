@@ -157,7 +157,10 @@ export default function CategoriesPage() {
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-slate-800">Categories</h1>
         <button
-          onClick={() => setShowAddForm(true)}
+          onClick={() => {
+            setNewType(filter === "income" ? "income" : "expense");
+            setShowAddForm(true);
+          }}
           className="flex items-center gap-1 bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700"
         >
           <Plus size={16} />
@@ -317,6 +320,9 @@ export default function CategoriesPage() {
               <span className="text-xs font-medium uppercase text-slate-400 mr-2">{item.type}</span>
               {deletingId === item._id ? (
                 <div className="flex items-center gap-1">
+                  <span className="text-xs text-slate-500 mr-1 hidden sm:inline">
+                    Move to &quot;Other&quot;?
+                  </span>
                   <button
                     onClick={() => handleDelete(item._id)}
                     className="px-2 py-1 text-xs font-medium text-red-600 bg-red-50 rounded hover:bg-red-100"
