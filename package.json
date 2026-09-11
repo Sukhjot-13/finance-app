@@ -7,9 +7,17 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
-    "test": "vitest run"
+    "test": "vitest run",
+    "cap:sync": "cap sync ios",
+    "cap:open": "cap open ios",
+    "cap:run": "cap run ios"
   },
   "dependencies": {
+    "@capacitor/cli": "^8.5.2",
+    "@capacitor/core": "^8.5.2",
+    "@capacitor/haptics": "^8.0.2",
+    "@capacitor/ios": "^8.5.2",
+    "@capacitor/status-bar": "^8.0.3",
     "@getbrevo/brevo": "^3.0.1",
     "bcryptjs": "^3.0.2",
     "chart.js": "^4.5.0",

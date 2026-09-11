@@ -65,3 +65,18 @@
 .glow-emerald-sm {
   box-shadow: 0 0 15px -3px rgba(16, 185, 129, 0.2);
 }
+
+/* Safe area padding utilities for iOS / notch / dynamic island */
+.pt-safe {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+.pl-safe {
+  padding-left: env(safe-area-inset-left, 0px);
+}
+.pr-safe {
+  padding-right: env(safe-area-inset-right, 0px);
+}
+

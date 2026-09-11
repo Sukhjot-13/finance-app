@@ -67,7 +67,7 @@ function Sidebar({ isOpen, onClose }) {
         exit="hidden"
         variants={sidebarVariants}
         transition={{ type: "spring", stiffness: 300, damping: 30 }}
-        className="fixed lg:relative inset-y-0 left-0 w-64 bg-zinc-900/90 border-r border-zinc-800/80 backdrop-blur-xl text-zinc-100 flex flex-col z-40 transform lg:translate-x-0"
+        className="fixed lg:relative inset-y-0 left-0 w-64 bg-zinc-900/90 border-r border-zinc-800/80 backdrop-blur-xl text-zinc-100 flex flex-col z-40 transform lg:translate-x-0 pt-safe pb-safe"
       >
         <div className="p-6 flex items-center justify-between border-b border-zinc-800/80">
           <Link href="/dashboard" className="flex items-center gap-3 group">
@@ -383,7 +383,7 @@ export default function MainLayout({ children }) {
         <Sidebar isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
         
         <main className="flex-1 flex flex-col overflow-hidden relative z-10">
-          <header className="bg-zinc-950/70 backdrop-blur-xl border-b border-zinc-800/80 px-4 sm:px-8 py-4 sticky top-0 z-20">
+          <header className="bg-zinc-950/70 backdrop-blur-xl border-b border-zinc-800/80 px-4 sm:px-8 py-4 pt-[calc(1rem+env(safe-area-inset-top,0px))] lg:pt-4 sticky top-0 z-20">
             <div className="flex justify-between items-center">
               <div className="flex items-center gap-3">
                 <button

@@ -8,9 +8,23 @@ export const dynamic = "force-dynamic";
 
 const inter = Inter({ subsets: ["latin"] });
 
+export const viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+  viewportFit: "cover",
+  themeColor: "#09090b",
+};
+
 export const metadata = {
   title: "Finance Tracker",
   description: "Your personal finance command center.",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "FinTrack",
+  },
 };
 
 export default function RootLayout({ children }) {

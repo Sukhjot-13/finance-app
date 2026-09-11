@@ -19,7 +19,9 @@ A Next.js 16 personal finance tracking application with OTP-based authentication
 | `/postcss.config.mjs` | PostCSS configuration for Tailwind CSS |
 | `/eslint.config.mjs` | ESLint configuration |
 | `/jsconfig.json` | JavaScript/Next.js path aliases (@/ maps to ./src) |
+| `/capacitor.config.ts` | Capacitor iOS configuration (points to `https://fintrack.vistaenvision.com`, dark status bar, safe area handling, configurable via `CAPACITOR_SERVER_URL`) |
 | `/README.md` | Project documentation |
+| `/appMigration.md` | iOS app migration guide & workflow (Next.js + Capacitor + Xcode) |
 | `/docs/architecture.md` | Project architecture documentation |
 | `/docs/audit.md` | Audit status (both 2026-08-22 cycles closed — no open items; standing verification + intentional-behavior notes only) |
 | `/docs/suggestions.md` | Suggestions / improvement / vulnerability log (open items only — completed ones removed, history in git) |
@@ -286,9 +288,23 @@ Dashboard pie (lazy-loaded `SimpleChart`) and reports bar chart; slice colors ge
 
 ---
 
+## iOS Mobile Application (`/ios/`)
+
+The application is packaged as an iOS app using Capacitor (Swift Package Manager / Xcode):
+- **`capacitor.config.ts`**: Configures the Capacitor iOS container:
+  - Default URL: points to `https://fintrack.vistaenvision.com`.
+  - Development override: supports `process.env.CAPACITOR_SERVER_URL` (e.g. `http://localhost:3000` or local Wi-Fi IP).
+  - Background color: `#09090b` (eliminates white flashes on launch).
+  - Native plugins: `@capacitor/status-bar` (styled dark `#09090b`), `@capacitor/haptics`.
+- **`ios/App/App.xcodeproj`**: The native Xcode project for building and running on iOS simulators or connected physical iPhones.
+- **`ios/App/App/AppDelegate.swift`**: Native iOS entry point initializing the Capacitor bridge and WKWebView.
+- **Safe Area Insets**: Viewport configured with `viewportFit: "cover"` in `src/app/layout.js`, and `pt-safe` / `pb-safe` utilities defined in `src/app/globals.css` ensuring headers and drawers respect the iPhone notch and Dynamic Island.
+
+---
+
 ## Environment Variables
 
-Define all of these in a `.env.local` file at the project root. (No new variables were introduced in the latest cycle.)
+Define all of these in a `.env.local` file at the project root.
 
 | Variable | Purpose | Referenced In |
 |----------|---------|---------------|
@@ -299,6 +315,7 @@ Define all of these in a `.env.local` file at the project root. (No new variable
 | `REFRESH_TOKEN_SECRET` | JWT secret for refresh tokens (30d expiry, rotated on use) | `src/lib/auth.js`, refresh route |
 | `JWT_SECRET` | Additional JWT secret (reserved) | — |
 | `NODE_ENV` | Environment mode (`development` adds `'unsafe-eval'` to CSP script-src; controls cookie security) | proxy, auth routes |
+| `CAPACITOR_SERVER_URL` | (Optional) Overrides the target URL loaded by the iOS app (defaults to `https://fintrack.vistaenvision.com`) | `capacitor.config.ts` |
 
 ### Generating JWT Secrets
 ```bash

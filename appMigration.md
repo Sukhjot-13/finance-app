@@ -1,209 +1,109 @@
-Convert an Existing Next.js Website into an iPhone App
+# FinTrack iOS App Migration (Next.js + Capacitor + Xcode)
+
+This guide documents the iOS setup for **FinTrack**, turning the hosted Next.js web application into an iPhone application using **Capacitor 8** and **Xcode 26**.
+
+---
+
+## 1. Architecture Overview
+
+Since FinTrack relies on dynamic server-side functionality (MongoDB persistence, sliding-window rate limiting, HTTP-only cookie authentication, and Next.js API routes), the native iOS app wraps the live hosted Next.js app in a native `WKWebView` container:
+
+```text
+iPhone (iOS Native App: FinTrack)
+      ↓
+Capacitor WKWebView Container
+      ↓
+https://fintrack.vistaenvision.com (Vercel)
+      ↓
+MongoDB Atlas & Brevo API
+```
+
+---
+
+## 2. Configured Settings
+
+The project has been configured with:
+- **App Name:** `FinTrack`
+- **App ID (Bundle Identifier):** `com.sukhjot.fintrack`
+- **Target URL:** `https://fintrack.vistaenvision.com` (configured in `capacitor.config.ts`)
+- **Native Plugins:**
+  - `@capacitor/status-bar`: Configured with dark style and `#09090b` background matching the fintech theme.
+  - `@capacitor/haptics`: Ready for native haptic feedback.
+- **Safe Area Insets:**
+  - `src/app/layout.js`: Exported `viewportFit: "cover"` and `appleWebApp` metadata.
+  - `src/app/globals.css`: Added `.pt-safe`, `.pb-safe`, `.pl-safe`, and `.pr-safe` utilities.
+  - `src/app/(main)/layout.js`: Applied top safe-area padding to the mobile header and sidebar so controls never collide with the Dynamic Island or notch.
+
+---
+
+## 3. Quick Commands
+
+The following convenience scripts are available in `package.json`:
+
+```bash
+# Sync Capacitor configuration and web assets to the iOS project:
+npm run cap:sync
+
+# Open the iOS project in Xcode:
+npm run cap:open
+
+# Run the iOS project directly to a connected simulator or device:
+npm run cap:run
+```
+
+---
+
+## 4. How to Open and Run on iPhone / Simulator
+
+### Step 1: Open the Project in Xcode
+Run in your terminal:
+```bash
+npm run cap:open
+```
+This will open `ios/App/App.xcodeproj` in Xcode.
+
+### Step 2: Configure Signing in Xcode
+1. In the left project navigator, select the top-level **App** project.
+2. Select the **App** target.
+3. Click the **Signing & Capabilities** tab.
+4. Check **Automatically manage signing**.
+5. In the **Team** dropdown, select your Apple Account (Personal Team) or paid Apple Developer Team.
+6. Confirm the Bundle Identifier is `com.sukhjot.fintrack` (or your unique identifier if needed).
+
+### Step 3: Run on Simulator or Physical iPhone
+- **To test on Simulator:** Select any iPhone simulator (e.g. iPhone 16 Pro) in the device dropdown at the top of Xcode, and click the **Run (Play)** button.
+- **To test on your physical iPhone:**
+  1. Connect your iPhone to your Mac via USB cable.
+  2. Unlock your iPhone and tap "Trust This Computer" if prompted.
+  3. Select your iPhone in the device dropdown in Xcode.
+  4. Press the **Run** button.
+  5. *(First time only on iPhone):* On your iPhone, go to **Settings > General > VPN & Device Management**, tap your Developer Account, and tap **Trust**.
+
+---
+
+## 5. Local Development Testing (Optional)
+
+If you want to test local Next.js code on your iPhone before deploying to Vercel:
+
+1. Start your Next.js dev server on your Mac:
+   ```bash
+   npm run dev
+   ```
+2. Set the `CAPACITOR_SERVER_URL` environment variable to your Mac's local network IP (e.g. `http://192.168.1.50:3000`):
+   ```bash
+   CAPACITOR_SERVER_URL=http://192.168.1.50:3000 npm run cap:sync
+   ```
+3. Run the app in Xcode. It will load from your local dev server.
+4. When ready to switch back to production:
+   ```bash
+   npm run cap:sync
+   ```
+   (Without `CAPACITOR_SERVER_URL`, it automatically defaults back to `https://fintrack.vistaenvision.com`).
 
-Recommended approach: Next.js + Capacitor + Xcode
+---
 
-1. Keep your existing Next.js app
+## 6. Updating the App
 
-Do not rebuild the app in Swift or React Native unless you specifically need a fully native app.
-
-If your Next.js site already uses things like:
-
-- Server Actions
-- API routes
-- SSR
-- Authentication
-- Database calls
-- Dynamic pages
-
-keep the website hosted normally and let the iPhone app load it.
-
-Typical setup:
-
-iPhone App
-↓
-Capacitor / WKWebView
-↓
-https://yourwebsite.com
-↓
-Next.js Server
-↓
-Database / APIs
-
-2. Install Capacitor
-
-Open Terminal and go to your existing Next.js project:
-
-cd your-nextjs-project
-
-Install Capacitor:
-
-npm install @capacitor/core @capacitor/cli
-
-Install iOS support:
-
-npm install @capacitor/ios
-
-3. Initialize Capacitor
-
-Run:
-
-npx cap init
-
-Capacitor will ask for:
-
-- App name
-- App ID
-
-Example:
-
-App name:
-My App
-
-App ID:
-com.yourname.myapp
-
-4. Add the iOS project
-
-Run:
-
-npx cap add ios
-
-This creates an iOS folder inside your project.
-
-Example structure:
-
-your-nextjs-project/
-├── app/
-├── components/
-├── package.json
-├── capacitor.config.ts
-└── ios/
-└── App/
-
-5. Configure Capacitor to load your hosted Next.js website
-
-If your Next.js app depends on server-side features, the easiest approach is to keep it hosted and configure the Capacitor app to load your live website.
-
-Your capacitor.config.ts can be configured to use your website URL.
-
-Example:
-
-import type { CapacitorConfig } from '@capacitor/cli';
-
-const config: CapacitorConfig = {
-appId: 'com.yourname.myapp',
-appName: 'My App',
-webDir: 'out',
-server: {
-url: 'https://yourwebsite.com',
-cleartext: false
-}
-};
-
-export default config;
-
-Replace:
-
-https://yourwebsite.com
-
-with your real Next.js website URL.
-
-6. Open the iOS app in Xcode
-
-Run:
-
-npx cap open ios
-
-This opens the generated iPhone project in Xcode.
-
-7. Connect your iPhone
-
-Connect your iPhone to your Mac using USB.
-
-In Xcode:
-
-- Select your iPhone as the target device.
-- Open the Signing & Capabilities section.
-- Select your Apple Account / Personal Team.
-- Make sure the Bundle Identifier is unique.
-
-8. Install the app on your iPhone
-
-Press the Run button in Xcode.
-
-Xcode will build the app and install it directly on your iPhone.
-
-You do not need to publish the app on the App Store.
-
-9. Using a free Apple Account
-
-You can install the app using a free Apple developer Personal Team.
-
-Main limitation:
-
-- The signing profile usually expires after 7 days.
-- You may need to reconnect your iPhone and run the app from Xcode again.
-
-10. Using a paid Apple Developer Account
-
-If you pay for the Apple Developer Program, you get more convenient distribution and signing options.
-
-For a personal app, you can use registered-device / Ad Hoc-style distribution without making the app publicly available on the App Store.
-
-11. Updating the app
-
-If the Capacitor app loads your hosted Next.js website:
-
-- Update your Next.js code.
-- Deploy your website normally.
-- The iPhone app will load the updated website.
-
-You usually do not need to rebuild the iPhone app for normal website/UI changes.
-
-You only need to rebuild the native iOS app when you change native functionality, plugins, permissions, app icons, splash screens, or other iOS-specific settings.
-
-12. Adding native features later
-
-Capacitor lets you add native iPhone features while keeping your existing Next.js frontend.
-
-Examples:
-
-- Camera
-- Face ID / biometrics
-- Push notifications
-- Haptics
-- File access
-- Share sheet
-- Geolocation
-- Status bar controls
-- App lifecycle events
-
-Alternative: PWA
-
-If you only want your website to appear as an app icon on your iPhone, the fastest option is a Progressive Web App (PWA).
-
-On iPhone:
-
-1. Open the website in Safari.
-2. Tap Share.
-3. Tap Add to Home Screen.
-4. Give the app a name.
-5. Tap Add.
-
-This requires no Xcode and no App Store.
-
-However, Capacitor is better if you want more native iPhone features.
-
-Recommended setup
-
-For an existing Next.js app:
-
-Existing Next.js Website
-↓
-Capacitor
-↓
-Xcode
-↓
-Install directly on your iPhone
-
-This is usually the fastest way to turn an existing Next.js website into a personal iPhone app without rebuilding everything.
+Because FinTrack loads your hosted Vercel deployment:
+- **UI and frontend changes:** Simply deploy your updates to Vercel. The iPhone app automatically loads the updated website on next launch without rebuilding Xcode.
+- **Native changes:** Only rebuild in Xcode when you change native iOS plugins, permissions in `Info.plist`, app icons, splash screens, or native capabilities.
