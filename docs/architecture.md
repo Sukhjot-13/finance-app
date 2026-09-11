@@ -23,7 +23,8 @@ A Next.js 16 personal finance tracking application with OTP-based authentication
 | `/README.md` | Project documentation |
 | `/appMigration.md` | iOS app migration guide & workflow (Next.js + Capacitor + Xcode) |
 | `/docs/architecture.md` | Project architecture documentation |
-| `/docs/appsteps.md` | Complete log of all iOS installation steps, passwords/prompts, and future update workflows |
+| `/docs/appsteps.md` | Complete log of all iOS installation steps, passwords/prompts, and credentials used |
+| `/docs/updateapp.md` | Guide on updating the iOS app (Vercel automatic deploys, local testing, native updates, 7-day cert renewal) |
 | `/docs/audit.md` | Audit status (both 2026-08-22 cycles closed — no open items; standing verification + intentional-behavior notes only) |
 | `/docs/suggestions.md` | Suggestions / improvement / vulnerability log (open items only — completed ones removed, history in git) |
 
