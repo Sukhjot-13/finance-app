@@ -374,6 +374,8 @@ export default function MainLayout({ children }) {
 
   const handleMainTouchStart = (e) => {
     if (isSidebarOpen || (typeof window !== "undefined" && window.innerWidth >= 1024)) return;
+    // Never trigger edge swipe or drag if touching the navbar, buttons, or inputs
+    if (e.target.closest("header, button, input, select, textarea")) return;
     const touch = e.touches[0];
     // Detect swipe starting within 40px of left screen edge
     if (touch.clientX <= 40) {
@@ -444,10 +446,10 @@ export default function MainLayout({ children }) {
         <div className="absolute -top-40 left-1/4 w-96 h-96 bg-emerald-500/5 blur-[120px] pointer-events-none rounded-full" />
         <div className="absolute -bottom-40 right-10 w-96 h-96 bg-teal-500/5 blur-[120px] pointer-events-none rounded-full" />
 
-        {/* Dedicated edge swipe detection area for mobile */}
+        {/* Dedicated edge swipe detection area for mobile (below header) */}
         {!isSidebarOpen && (
           <div
-            className="fixed top-0 bottom-0 left-0 w-6 z-25 lg:hidden"
+            className="fixed top-20 bottom-0 left-0 w-6 z-25 lg:hidden"
             onTouchStart={handleMainTouchStart}
             onTouchEnd={handleMainTouchEnd}
             aria-hidden="true"
@@ -457,7 +459,10 @@ export default function MainLayout({ children }) {
         <Sidebar isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
         
         <main className="flex-1 flex flex-col h-full overflow-hidden relative z-10">
-          <header className="shrink-0 bg-zinc-950/90 backdrop-blur-xl border-b border-zinc-800/80 px-4 sm:px-8 py-3.5 pt-[calc(0.875rem+env(safe-area-inset-top,0px))] lg:pt-3.5 z-20">
+          <header 
+            onTouchMove={(e) => e.preventDefault()}
+            className="shrink-0 touch-none select-none bg-zinc-950/90 backdrop-blur-xl border-b border-zinc-800/80 px-4 sm:px-8 py-3.5 pt-[calc(0.875rem+env(safe-area-inset-top,0px))] lg:pt-3.5 z-20"
+          >
             <div className="flex justify-between items-center">
               <div className="flex items-center gap-3">
                 <button
@@ -477,7 +482,7 @@ export default function MainLayout({ children }) {
             </div>
           </header>
           
-          <div className="flex-1 overflow-y-auto overscroll-y-contain p-4 sm:p-8">{children}</div>
+          <div className="flex-1 overflow-y-auto overscroll-y-none p-4 sm:p-8">{children}</div>
         </main>
       </div>
     </UserContext.Provider>
