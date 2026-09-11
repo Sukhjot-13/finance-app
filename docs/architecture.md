@@ -94,9 +94,9 @@ A Next.js 16 personal finance tracking application with OTP-based authentication
 
 - **`src/app/(main)/layout.js`** - Main app shell with sidebar, header, and user context ("use client").
   - `UserContext` - React Context exporting `{ user, setUser }`. Pages call `setUser` (e.g. profile save) so currency/name changes propagate app-wide without a reload.
-  - `Sidebar()` - Nav sidebar (Dashboard/Transactions/Reports/Categories). Responsive overlay on mobile, animated via Framer Motion, active-route highlight.
+  - `Sidebar()` - Nav sidebar (Dashboard/Transactions/Reports/Categories). Responsive overlay on mobile with safe area insets (`pt-safe pb-safe`), animated via Framer Motion, active-route highlight. Supports native drag and swipe-left gesture to dismiss.
   - `ProfileDropdown()` - User menu with Profile link and **two-step logout confirmation** (Logout → "Log out of FinTrack on this device?" → Yes/Cancel — a stray click can no longer log the user out). Closes on outside click and Escape; button has `aria-haspopup`/`aria-expanded`; items carry `role="menu"/"menuitem"`. Shows `user.accountName`; confirmed logout calls `POST /api/auth/logout`.
-  - `MainLayout()` - Fetches user via `GET /api/user`. On transient failure shows an inline **retry card** instead of redirecting (definitive auth failures are handled inside `api()` itself). Sidebar resize handling only reacts to *crossing* the desktop breakpoint (manual collapse within a mode is preserved); route changes close the mobile sidebar via React's render-time-adjustment pattern (no setState-in-effect).
+  - `MainLayout()` - Fetches user via `GET /api/user`. On transient failure shows an inline **retry card** instead of redirecting. Uses a locked viewport (`fixed inset-0 h-[100dvh]`) preventing iOS rubberband bounce; fixed non-scrolling header (`shrink-0 z-20`) with safe-area padding; isolated content scrolling (`overscroll-y-contain`); and touch gesture handler supporting edge-swipe right from the left screen boundary to open the mobile drawer. Route changes close the mobile sidebar via render-time adjustments.
 
 - **`src/app/(main)/dashboard/page.js`** - Dashboard page ("use client").
   - `generateSliceColors(count)` - Curated palette plus golden-angle HSL fallback so any number of pie slices gets a distinct color.

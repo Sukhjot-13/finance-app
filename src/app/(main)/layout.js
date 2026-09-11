@@ -46,6 +46,26 @@ function Sidebar({ isOpen, onClose }) {
     visible: { x: "0%" },
   };
 
+  // Touch gesture state for swiping left to close
+  const touchStartX = useRef(null);
+  const touchStartY = useRef(null);
+
+  const handleTouchStart = (e) => {
+    touchStartX.current = e.touches[0].clientX;
+    touchStartY.current = e.touches[0].clientY;
+  };
+
+  const handleTouchEnd = (e) => {
+    if (touchStartX.current === null) return;
+    const deltaX = e.changedTouches[0].clientX - touchStartX.current;
+    const deltaY = Math.abs(e.changedTouches[0].clientY - touchStartY.current);
+    if (deltaX < -40 && Math.abs(deltaX) > deltaY) {
+      onClose();
+    }
+    touchStartX.current = null;
+    touchStartY.current = null;
+  };
+
   return (
     <>
       <AnimatePresence>
@@ -66,8 +86,18 @@ function Sidebar({ isOpen, onClose }) {
         animate={isOpen ? "visible" : "hidden"}
         exit="hidden"
         variants={sidebarVariants}
-        transition={{ type: "spring", stiffness: 300, damping: 30 }}
-        className="fixed lg:relative inset-y-0 left-0 w-64 bg-zinc-900/90 border-r border-zinc-800/80 backdrop-blur-xl text-zinc-100 flex flex-col z-40 transform lg:translate-x-0 pt-safe pb-safe"
+        transition={{ type: "spring", stiffness: 350, damping: 35 }}
+        drag="x"
+        dragConstraints={{ left: -260, right: 0 }}
+        dragElastic={0.05}
+        onDragEnd={(_e, info) => {
+          if (info.offset.x < -60 || info.velocity.x < -250) {
+            onClose();
+          }
+        }}
+        onTouchStart={handleTouchStart}
+        onTouchEnd={handleTouchEnd}
+        className="fixed lg:relative inset-y-0 left-0 w-64 bg-zinc-900/95 border-r border-zinc-800/80 backdrop-blur-xl text-zinc-100 flex flex-col z-40 transform lg:translate-x-0 pt-safe pb-safe shadow-2xl touch-pan-y"
       >
         <div className="p-6 flex items-center justify-between border-b border-zinc-800/80">
           <Link href="/dashboard" className="flex items-center gap-3 group">
@@ -338,6 +368,36 @@ export default function MainLayout({ children }) {
     return "FinTrack";
   };
 
+  // Left edge-swipe gesture to open mobile sidebar
+  const edgeTouchStartXRef = useRef(null);
+  const edgeTouchStartYRef = useRef(null);
+
+  const handleMainTouchStart = (e) => {
+    if (isSidebarOpen || (typeof window !== "undefined" && window.innerWidth >= 1024)) return;
+    const touch = e.touches[0];
+    // Detect swipe starting within 40px of left screen edge
+    if (touch.clientX <= 40) {
+      edgeTouchStartXRef.current = touch.clientX;
+      edgeTouchStartYRef.current = touch.clientY;
+    } else {
+      edgeTouchStartXRef.current = null;
+      edgeTouchStartYRef.current = null;
+    }
+  };
+
+  const handleMainTouchEnd = (e) => {
+    if (edgeTouchStartXRef.current === null) return;
+    const touch = e.changedTouches[0];
+    const deltaX = touch.clientX - edgeTouchStartXRef.current;
+    const deltaY = Math.abs(touch.clientY - edgeTouchStartYRef.current);
+    // Swiped right by at least 45px with predominantly horizontal movement
+    if (deltaX > 45 && deltaX > deltaY) {
+      setIsSidebarOpen(true);
+    }
+    edgeTouchStartXRef.current = null;
+    edgeTouchStartYRef.current = null;
+  };
+
   if (loading) {
     return (
       <div className="flex flex-col items-center justify-center h-screen bg-zinc-950 text-zinc-100">
@@ -375,20 +435,34 @@ export default function MainLayout({ children }) {
 
   return (
     <UserContext.Provider value={{ user, setUser }}>
-      <div className="flex h-screen bg-zinc-950 overflow-hidden text-zinc-100 relative selection:bg-emerald-500/30 selection:text-emerald-300">
+      <div 
+        onTouchStart={handleMainTouchStart}
+        onTouchEnd={handleMainTouchEnd}
+        className="fixed inset-0 h-[100dvh] w-screen bg-zinc-950 overflow-hidden text-zinc-100 flex selection:bg-emerald-500/30 selection:text-emerald-300"
+      >
         {/* Ambient subtle glow effects */}
         <div className="absolute -top-40 left-1/4 w-96 h-96 bg-emerald-500/5 blur-[120px] pointer-events-none rounded-full" />
         <div className="absolute -bottom-40 right-10 w-96 h-96 bg-teal-500/5 blur-[120px] pointer-events-none rounded-full" />
 
+        {/* Dedicated edge swipe detection area for mobile */}
+        {!isSidebarOpen && (
+          <div
+            className="fixed top-0 bottom-0 left-0 w-6 z-25 lg:hidden"
+            onTouchStart={handleMainTouchStart}
+            onTouchEnd={handleMainTouchEnd}
+            aria-hidden="true"
+          />
+        )}
+
         <Sidebar isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
         
-        <main className="flex-1 flex flex-col overflow-hidden relative z-10">
-          <header className="bg-zinc-950/70 backdrop-blur-xl border-b border-zinc-800/80 px-4 sm:px-8 py-4 pt-[calc(1rem+env(safe-area-inset-top,0px))] lg:pt-4 sticky top-0 z-20">
+        <main className="flex-1 flex flex-col h-full overflow-hidden relative z-10">
+          <header className="shrink-0 bg-zinc-950/90 backdrop-blur-xl border-b border-zinc-800/80 px-4 sm:px-8 py-3.5 pt-[calc(0.875rem+env(safe-area-inset-top,0px))] lg:pt-3.5 z-20">
             <div className="flex justify-between items-center">
               <div className="flex items-center gap-3">
                 <button
                   onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-                  className="lg:hidden text-zinc-400 hover:text-zinc-100 p-1.5 rounded-lg hover:bg-zinc-900 border border-zinc-800"
+                  className="lg:hidden text-zinc-400 hover:text-zinc-100 p-1.5 rounded-lg hover:bg-zinc-900 border border-zinc-800 active:scale-95 transition-transform"
                   aria-label="Toggle menu"
                 >
                   {isSidebarOpen ? <X size={20} /> : <Menu size={20} />}
@@ -403,7 +477,7 @@ export default function MainLayout({ children }) {
             </div>
           </header>
           
-          <div className="flex-1 overflow-y-auto p-4 sm:p-8">{children}</div>
+          <div className="flex-1 overflow-y-auto overscroll-y-contain p-4 sm:p-8">{children}</div>
         </main>
       </div>
     </UserContext.Provider>
