@@ -249,3 +249,40 @@ describe("TransactionsPage — page clamp after deleting last row of a page (B4)
     await screen.findAllByText("first");
   });
 });
+
+describe("MainLayout — Navigation & Mobile Drawer", () => {
+  it("renders desktop navigation and starts with mobile drawer closed by default", async () => {
+    globalThis.__apiMock.mockImplementation(async (url) => {
+      if (url === "/api/user") return apiResponse({ accountName: "Sukhjot", currency: "USD" });
+      return apiResponse({});
+    });
+
+    render(
+      <MainLayout>
+        <div>Content</div>
+      </MainLayout>
+    );
+
+    // Desktop nav items are rendered
+    expect(await screen.findByText("Content")).toBeTruthy();
+    expect(screen.getByText("Finance Pro")).toBeTruthy();
+
+    // On mobile phone, drawer is closed by default (no close button initially)
+    expect(screen.queryByLabelText("Close sidebar")).toBeNull();
+
+    // Clicking the toggle button opens the drawer
+    const toggleButton = screen.getByLabelText("Toggle menu");
+    fireEvent.click(toggleButton);
+
+    // Now the mobile close button is visible
+    const closeButton = await screen.findByLabelText("Close sidebar");
+    expect(closeButton).toBeTruthy();
+
+    // Clicking close button closes the mobile drawer
+    fireEvent.click(closeButton);
+    await waitFor(() => {
+      expect(screen.queryByLabelText("Close sidebar")).toBeNull();
+    });
+  });
+});
+

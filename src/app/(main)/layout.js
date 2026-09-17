@@ -26,7 +26,7 @@ import api from "@/lib/api";
 // without a full reload.
 export const UserContext = createContext(null);
 
-function Sidebar({ isOpen, onClose }) {
+function SidebarContent({ onClose, isMobile = false }) {
   const pathname = usePathname();
   const navItems = [
     { href: "/dashboard", label: "Dashboard", icon: Home },
@@ -36,17 +36,96 @@ function Sidebar({ isOpen, onClose }) {
   ];
 
   const handleLinkClick = () => {
-    if (window.innerWidth < 1024) {
+    if (isMobile && onClose) {
       onClose();
     }
   };
 
-  const sidebarVariants = {
-    hidden: { x: "-100%" },
-    visible: { x: "0%" },
-  };
+  return (
+    <>
+      <div className="p-6 flex items-center justify-between border-b border-zinc-800/80">
+        <Link href="/dashboard" className="flex items-center gap-3 group" onClick={handleLinkClick}>
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-400 to-teal-600 flex items-center justify-center text-zinc-950 shadow-md shadow-emerald-500/20 group-hover:scale-105 transition-transform">
+            <PiggyBank size={22} className="stroke-[2.5]" />
+          </div>
+          <div>
+            <span className="text-xl font-bold tracking-tight bg-gradient-to-r from-zinc-100 via-zinc-200 to-zinc-400 bg-clip-text text-transparent">
+              FinTrack
+            </span>
+            <span className="block text-[10px] uppercase font-mono tracking-widest text-emerald-400/80">
+              Finance Pro
+            </span>
+          </div>
+        </Link>
+        {isMobile && (
+          <button
+            onClick={onClose}
+            className="text-zinc-400 hover:text-zinc-200 p-1.5 rounded-lg hover:bg-zinc-800/50"
+            aria-label="Close sidebar"
+          >
+            <X size={20} />
+          </button>
+        )}
+      </div>
 
-  // Touch gesture state for swiping left to close
+      <nav className="flex-1 px-3 py-6 space-y-1">
+        <p className="px-3 pb-2 text-[11px] font-semibold uppercase tracking-wider text-zinc-500 font-mono">
+          Navigation
+        </p>
+        <ul>
+          {navItems.map((item) => {
+            const isActive = pathname === item.href;
+            const Icon = item.icon;
+            return (
+              <li key={item.href}>
+                <Link
+                  href={item.href}
+                  onClick={handleLinkClick}
+                  className={`flex items-center px-3.5 py-2.5 my-1 rounded-xl text-sm font-medium transition-all duration-150 ${
+                    isActive
+                      ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 shadow-[0_0_20px_rgba(16,185,129,0.12)]"
+                      : "text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/50 border border-transparent"
+                  }`}
+                >
+                  <Icon
+                    className={`mr-3 transition-colors ${
+                      isActive ? "text-emerald-400" : "text-zinc-500 group-hover:text-zinc-300"
+                    }`}
+                    size={18}
+                  />
+                  {item.label}
+                </Link>
+              </li>
+            );
+          })}
+        </ul>
+      </nav>
+
+      {/* Sidebar Footer badge */}
+      <div className="p-4 m-3 rounded-2xl bg-zinc-950/60 border border-zinc-800/60">
+        <div className="flex items-center gap-2 mb-1.5 text-xs font-medium text-emerald-400">
+          <Sparkles size={14} />
+          <span>Smart Tracking</span>
+        </div>
+        <p className="text-[11px] text-zinc-400 leading-relaxed">
+          Real-time balance, budgets, and automated reports.
+        </p>
+      </div>
+    </>
+  );
+}
+
+// Desktop: Static normal sidebar, always visible, no drag or slide animation
+function DesktopSidebar() {
+  return (
+    <aside className="hidden lg:flex flex-col w-64 shrink-0 bg-zinc-900/95 border-r border-zinc-800/80 backdrop-blur-xl text-zinc-100 z-30">
+      <SidebarContent isMobile={false} />
+    </aside>
+  );
+}
+
+// Mobile: Slide-in drawer with swipe/drag gestures, closed by default on phone
+function MobileDrawer({ isOpen, onClose }) {
   const touchStartX = useRef(null);
   const touchStartY = useRef(null);
 
@@ -67,7 +146,7 @@ function Sidebar({ isOpen, onClose }) {
   };
 
   return (
-    <>
+    <div className="lg:hidden">
       <AnimatePresence>
         {isOpen && (
           <motion.div
@@ -75,98 +154,36 @@ function Sidebar({ isOpen, onClose }) {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={onClose}
-            className="fixed inset-0 bg-black/70 backdrop-blur-sm z-30 lg:hidden"
+            className="fixed inset-0 bg-black/70 backdrop-blur-sm z-40"
             aria-hidden="true"
           />
         )}
       </AnimatePresence>
 
-      <motion.aside
-        initial="hidden"
-        animate={isOpen ? "visible" : "hidden"}
-        exit="hidden"
-        variants={sidebarVariants}
-        transition={{ type: "spring", stiffness: 350, damping: 35 }}
-        drag="x"
-        dragConstraints={{ left: -260, right: 0 }}
-        dragElastic={0.05}
-        onDragEnd={(_e, info) => {
-          if (info.offset.x < -60 || info.velocity.x < -250) {
-            onClose();
-          }
-        }}
-        onTouchStart={handleTouchStart}
-        onTouchEnd={handleTouchEnd}
-        className="fixed lg:relative inset-y-0 left-0 w-64 bg-zinc-900/95 border-r border-zinc-800/80 backdrop-blur-xl text-zinc-100 flex flex-col z-40 transform lg:translate-x-0 pt-safe pb-safe shadow-2xl touch-pan-y"
-      >
-        <div className="p-6 flex items-center justify-between border-b border-zinc-800/80">
-          <Link href="/dashboard" className="flex items-center gap-3 group">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-400 to-teal-600 flex items-center justify-center text-zinc-950 shadow-md shadow-emerald-500/20 group-hover:scale-105 transition-transform">
-              <PiggyBank size={22} className="stroke-[2.5]" />
-            </div>
-            <div>
-              <span className="text-xl font-bold tracking-tight bg-gradient-to-r from-zinc-100 via-zinc-200 to-zinc-400 bg-clip-text text-transparent">
-                FinTrack
-              </span>
-              <span className="block text-[10px] uppercase font-mono tracking-widest text-emerald-400/80">
-                Finance Pro
-              </span>
-            </div>
-          </Link>
-          <button
-            onClick={onClose}
-            className="lg:hidden text-zinc-400 hover:text-zinc-200 p-1.5 rounded-lg hover:bg-zinc-800/50"
-            aria-label="Close sidebar"
+      <AnimatePresence>
+        {isOpen && (
+          <motion.aside
+            initial={{ x: "-100%" }}
+            animate={{ x: "0%" }}
+            exit={{ x: "-100%" }}
+            transition={{ type: "spring", stiffness: 350, damping: 35 }}
+            drag="x"
+            dragConstraints={{ left: -260, right: 0 }}
+            dragElastic={0.05}
+            onDragEnd={(_e, info) => {
+              if (info.offset.x < -60 || info.velocity.x < -250) {
+                onClose();
+              }
+            }}
+            onTouchStart={handleTouchStart}
+            onTouchEnd={handleTouchEnd}
+            className="fixed inset-y-0 left-0 w-64 bg-zinc-900/95 border-r border-zinc-800/80 backdrop-blur-xl text-zinc-100 flex flex-col z-50 pt-safe pb-safe shadow-2xl touch-pan-y"
           >
-            <X size={20} />
-          </button>
-        </div>
-
-        <nav className="flex-1 px-3 py-6 space-y-1">
-          <p className="px-3 pb-2 text-[11px] font-semibold uppercase tracking-wider text-zinc-500 font-mono">
-            Navigation
-          </p>
-          <ul>
-            {navItems.map((item) => {
-              const isActive = pathname === item.href;
-              const Icon = item.icon;
-              return (
-                <li key={item.href}>
-                  <Link
-                    href={item.href}
-                    onClick={handleLinkClick}
-                    className={`flex items-center px-3.5 py-2.5 my-1 rounded-xl text-sm font-medium transition-all duration-150 ${
-                      isActive
-                        ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 shadow-[0_0_20px_rgba(16,185,129,0.12)]"
-                        : "text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/50 border border-transparent"
-                    }`}
-                  >
-                    <Icon
-                      className={`mr-3 transition-colors ${
-                        isActive ? "text-emerald-400" : "text-zinc-500 group-hover:text-zinc-300"
-                      }`}
-                      size={18}
-                    />
-                    {item.label}
-                  </Link>
-                </li>
-              );
-            })}
-          </ul>
-        </nav>
-
-        {/* Sidebar Footer badge */}
-        <div className="p-4 m-3 rounded-2xl bg-zinc-950/60 border border-zinc-800/60">
-          <div className="flex items-center gap-2 mb-1.5 text-xs font-medium text-emerald-400">
-            <Sparkles size={14} />
-            <span>Smart Tracking</span>
-          </div>
-          <p className="text-[11px] text-zinc-400 leading-relaxed">
-            Real-time balance, budgets, and automated reports.
-          </p>
-        </div>
-      </motion.aside>
-    </>
+            <SidebarContent onClose={onClose} isMobile={true} />
+          </motion.aside>
+        )}
+      </AnimatePresence>
+    </div>
   );
 }
 
@@ -305,21 +322,18 @@ function ProfileDropdown() {
 
 export default function MainLayout({ children }) {
   const [user, setUser] = useState(null);
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  // Mobile drawer is closed by default on phones
+  const [isMobileOpen, setIsMobileOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const router = useRouter();
   const pathname = usePathname();
 
   useEffect(() => {
-    // Only react to crossing the desktop/mobile boundary; resizing within
-    // the same mode must not reopen a sidebar the user manually closed.
-    let wasDesktop = window.innerWidth >= 1024;
+    // When resizing to desktop view, ensure mobile drawer is dismissed
     const onResize = () => {
-      const isDesktop = window.innerWidth >= 1024;
-      if (isDesktop !== wasDesktop) {
-        setIsSidebarOpen(isDesktop);
-        wasDesktop = isDesktop;
+      if (window.innerWidth >= 1024) {
+        setIsMobileOpen(false);
       }
     };
     window.addEventListener("resize", onResize);
@@ -348,14 +362,12 @@ export default function MainLayout({ children }) {
     return () => window.removeEventListener("resize", onResize);
   }, [router]);
 
-  // Close the mobile sidebar when the route changes. Done as a render-time
-  // adjustment (React's recommended pattern for "respond to prop change")
-  // instead of a setState-in-effect, which causes cascading renders.
+  // Close the mobile drawer when the route changes.
   const [prevPathname, setPrevPathname] = useState(pathname);
   if (prevPathname !== pathname) {
     setPrevPathname(pathname);
-    if (typeof window !== "undefined" && window.innerWidth < 1024) {
-      setIsSidebarOpen(false);
+    if (isMobileOpen) {
+      setIsMobileOpen(false);
     }
   }
 
@@ -368,12 +380,12 @@ export default function MainLayout({ children }) {
     return "FinTrack";
   };
 
-  // Left edge-swipe gesture to open mobile sidebar
+  // Left edge-swipe gesture to open mobile sidebar (phone only)
   const edgeTouchStartXRef = useRef(null);
   const edgeTouchStartYRef = useRef(null);
 
   const handleMainTouchStart = (e) => {
-    if (isSidebarOpen || (typeof window !== "undefined" && window.innerWidth >= 1024)) return;
+    if (isMobileOpen || (typeof window !== "undefined" && window.innerWidth >= 1024)) return;
     // Never trigger edge swipe or drag if touching the navbar, buttons, or inputs
     if (e.target.closest("header, button, input, select, textarea")) return;
     const touch = e.touches[0];
@@ -394,7 +406,7 @@ export default function MainLayout({ children }) {
     const deltaY = Math.abs(touch.clientY - edgeTouchStartYRef.current);
     // Swiped right by at least 45px with predominantly horizontal movement
     if (deltaX > 45 && deltaX > deltaY) {
-      setIsSidebarOpen(true);
+      setIsMobileOpen(true);
     }
     edgeTouchStartXRef.current = null;
     edgeTouchStartYRef.current = null;
@@ -440,14 +452,14 @@ export default function MainLayout({ children }) {
       <div 
         onTouchStart={handleMainTouchStart}
         onTouchEnd={handleMainTouchEnd}
-        className="fixed inset-0 h-[100dvh] w-screen bg-zinc-950 overflow-hidden text-zinc-100 flex selection:bg-emerald-500/30 selection:text-emerald-300"
+        className="fixed inset-0 h-[100dvh] w-full bg-zinc-950 overflow-hidden text-zinc-100 flex selection:bg-emerald-500/30 selection:text-emerald-300"
       >
         {/* Ambient subtle glow effects */}
         <div className="absolute -top-40 left-1/4 w-96 h-96 bg-emerald-500/5 blur-[120px] pointer-events-none rounded-full" />
         <div className="absolute -bottom-40 right-10 w-96 h-96 bg-teal-500/5 blur-[120px] pointer-events-none rounded-full" />
 
-        {/* Dedicated edge swipe detection area for mobile (below header) */}
-        {!isSidebarOpen && (
+        {/* Dedicated edge swipe detection area for mobile phone (below header) */}
+        {!isMobileOpen && (
           <div
             className="fixed top-20 bottom-0 left-0 w-6 z-25 lg:hidden"
             onTouchStart={handleMainTouchStart}
@@ -456,21 +468,29 @@ export default function MainLayout({ children }) {
           />
         )}
 
-        <Sidebar isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
+        {/* Normal static sidebar for desktop browser */}
+        <DesktopSidebar />
+
+        {/* Slide-in drawer with gestures for mobile phone */}
+        <MobileDrawer isOpen={isMobileOpen} onClose={() => setIsMobileOpen(false)} />
         
         <main className="flex-1 flex flex-col h-full overflow-hidden relative z-10">
           <header 
-            onTouchMove={(e) => e.preventDefault()}
-            className="shrink-0 touch-none select-none bg-zinc-950/90 backdrop-blur-xl border-b border-zinc-800/80 px-4 sm:px-8 py-3.5 pt-[calc(0.875rem+env(safe-area-inset-top,0px))] lg:pt-3.5 z-20"
+            onTouchMove={(e) => {
+              if (typeof window !== "undefined" && window.innerWidth < 1024) {
+                e.preventDefault();
+              }
+            }}
+            className="shrink-0 bg-zinc-950/90 backdrop-blur-xl border-b border-zinc-800/80 px-4 sm:px-8 py-3.5 pt-[calc(0.875rem+env(safe-area-inset-top,0px))] lg:pt-3.5 z-20"
           >
             <div className="flex justify-between items-center">
               <div className="flex items-center gap-3">
                 <button
-                  onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+                  onClick={() => setIsMobileOpen(!isMobileOpen)}
                   className="lg:hidden text-zinc-400 hover:text-zinc-100 p-1.5 rounded-lg hover:bg-zinc-900 border border-zinc-800 active:scale-95 transition-transform"
                   aria-label="Toggle menu"
                 >
-                  {isSidebarOpen ? <X size={20} /> : <Menu size={20} />}
+                  {isMobileOpen ? <X size={20} /> : <Menu size={20} />}
                 </button>
                 <div>
                   <h1 className="text-xl font-bold tracking-tight text-zinc-100">
@@ -482,7 +502,7 @@ export default function MainLayout({ children }) {
             </div>
           </header>
           
-          <div className="flex-1 overflow-y-auto overscroll-y-none p-4 sm:p-8">{children}</div>
+          <div className="flex-1 overflow-y-auto overscroll-y-contain lg:overscroll-y-auto p-4 sm:p-8">{children}</div>
         </main>
       </div>
     </UserContext.Provider>

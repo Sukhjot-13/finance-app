@@ -82,11 +82,13 @@
   padding-right: env(safe-area-inset-right, 0px);
 }
 
-/* Fix header touch bounce on iOS */
-header {
-  touch-action: none;
-  -webkit-user-select: none;
-  user-select: none;
+/* Fix header touch bounce on iOS mobile */
+@media (max-width: 1023px) {
+  header {
+    touch-action: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
 }
 
 
