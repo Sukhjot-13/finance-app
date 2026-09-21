@@ -18,22 +18,36 @@ export default function SessionGate() {
 
   useEffect(() => {
     let cancelled = false;
+    // A hanging refresh must not spin forever: 10s timeout → /login.
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10_000);
     const decide = async () => {
       try {
-        const res = await fetch("/api/auth/refresh", { method: "POST" });
+        const res = await fetch("/api/auth/refresh", {
+          method: "POST",
+          signal: controller.signal,
+        });
         if (!cancelled) router.replace(res.ok ? "/dashboard" : "/login");
       } catch {
         if (!cancelled) router.replace("/login");
+      } finally {
+        clearTimeout(timeout);
       }
     };
     decide();
     return () => {
       cancelled = true;
+      clearTimeout(timeout);
+      controller.abort();
     };
   }, [router]);
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen bg-zinc-950 text-zinc-100">
+    <div
+      className="flex flex-col items-center justify-center min-h-screen bg-zinc-950 text-zinc-100"
+      role="status"
+      aria-label="Checking your session"
+    >
       <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-emerald-500 to-teal-400 flex items-center justify-center text-zinc-950 shadow-lg shadow-emerald-500/20 animate-pulse">
         <PiggyBank className="w-7 h-7" />
       </div>

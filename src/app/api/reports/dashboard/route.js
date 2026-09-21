@@ -26,11 +26,23 @@ export async function GET(req) {
       const parsed = new Date(value);
       return isNaN(parsed.getTime()) ? null : parsed;
     };
+    const startRaw = searchParams.get("start");
+    const endRaw = searchParams.get("end");
+    const startParam = startRaw ? parseInstant(startRaw) : null;
+    const endParam = endRaw ? parseInstant(endRaw) : null;
+    // Present-but-unparseable bounds are a client bug: 400 instead of
+    // silently falling back to a window the user didn't ask for.
+    if ((startRaw && !startParam) || (endRaw && !endParam)) {
+      return NextResponse.json(
+        { message: "Invalid date range. Use ISO date strings." },
+        { status: 400 }
+      );
+    }
     const startOfMonth =
-      parseInstant(searchParams.get("start")) ||
+      startParam ||
       new Date(new Date().getFullYear(), new Date().getMonth(), 1);
     const endOfMonth =
-      parseInstant(searchParams.get("end")) ||
+      endParam ||
       new Date(startOfMonth.getFullYear(), startOfMonth.getMonth() + 1, 1);
 
     // Aggregations

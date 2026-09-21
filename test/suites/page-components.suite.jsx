@@ -61,7 +61,7 @@ describe("WelcomePage — skip means skip (B3)", () => {
     fireEvent.click(screen.getByText("Skip for now"));
 
     await waitFor(() => expect(bodies).toEqual([{ onboarded: true }]));
-    await waitFor(() => expect(globalThis.__router.push).toHaveBeenCalledWith("/dashboard"));
+    await waitFor(() => expect(globalThis.__router.replace).toHaveBeenCalledWith("/dashboard"));
   });
 
   it("saving a name also completes onboarding in one call", async () => {
@@ -95,7 +95,7 @@ describe("WelcomePage — skip means skip (B3)", () => {
     fireEvent.click(screen.getByText("Continue to Dashboard"));
 
     expect(await screen.findByText("Name too long")).toBeTruthy();
-    expect(globalThis.__router.push).not.toHaveBeenCalled();
+    expect(globalThis.__router.replace).not.toHaveBeenCalled();
   });
 });
 
@@ -169,7 +169,7 @@ describe("LoginPage — OTP step + resend cooldown", () => {
     });
 
     expect(fetchCalls.some((u) => u.includes("/api/auth/otp/verify"))).toBe(true);
-    expect(globalThis.__router.push).toHaveBeenCalledWith("/dashboard");
+    expect(globalThis.__router.replace).toHaveBeenCalledWith("/dashboard");
   });
 
   it("'Use a different email' resets cleanly to step 1", async () => {

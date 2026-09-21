@@ -21,7 +21,9 @@ const BudgetSchema = new mongoose.Schema(
     month: {
       type: String,
       required: true,
-      match: [/^\d{4}-\d{2}$/, "Month must be in YYYY-MM format"],
+      // Strict calendar months: the naive /^\d{4}-\d{2}$/ also accepts
+      // "2026-13", which stores budgets no month-scoped query ever shows.
+      match: [/^\d{4}-(0[1-9]|1[0-2])$/, "Month must be in YYYY-MM format"],
     },
   },
   { timestamps: true }

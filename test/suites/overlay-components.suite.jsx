@@ -12,6 +12,11 @@ beforeEach(() => {
     ok: true,
     json: async () => ({ expense: ["Food"], income: ["Salary"], allCustom: [] }),
   }));
+  // draft persistence uses localStorage — never leak drafts between tests
+  try {
+    localStorage.clear();
+  } catch {
+  }
 });
 
 describe("AddTransactionDrawer", () => {
@@ -75,6 +80,18 @@ describe("AddTransactionDrawer", () => {
 
     const input = screen.getByLabelText(/New Category Name/);
     expect(input.getAttribute("maxlength")).toBe("50");
+  });
+
+  it("restores an interrupted draft on reopen (accidental-dismiss safety)", async () => {
+    const first = open();
+    await waitFor(() => expect(screen.getByPlaceholderText("0.00")).toBeTruthy());
+    fireEvent.change(screen.getByPlaceholderText("0.00"), { target: { value: "42" } });
+    fireEvent.change(screen.getByLabelText(/Description/), { target: { value: "draft desc" } });
+    first.unmount(); // Escape/backdrop would do the same
+
+    open();
+    await waitFor(() => expect(screen.getByPlaceholderText("0.00").value).toBe("42"));
+    expect(screen.getByLabelText(/Description/).value).toBe("draft desc");
   });
 
   it("submits noon-local instants so calendar dates survive timezones", async () => {

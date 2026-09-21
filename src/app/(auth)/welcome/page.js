@@ -3,42 +3,59 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { PiggyBank, Sparkles } from "lucide-react";
+import { Sparkles } from "lucide-react";
 import api from "@/lib/api";
 
 export default function WelcomePage() {
   const [accountName, setAccountName] = useState("");
   const [loading, setLoading] = useState(false);
+  const [skipping, setSkipping] = useState(false);
   const [error, setError] = useState("");
   const router = useRouter();
 
   const completeOnboarding = async () => {
+    // A failed skip must NOT navigate: onboarding would stay unpersisted
+    // and the user would loop back to /welcome on their next login.
+    setSkipping(true);
+    setError("");
     try {
-      await api("/api/user", {
+      const res = await api("/api/user", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ onboarded: true }),
       });
-    } catch {
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.message || "Could not skip onboarding. Please try again.");
+      }
+      router.replace("/dashboard");
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSkipping(false);
     }
-    router.push("/dashboard");
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    const trimmed = accountName.trim();
+    if (!trimmed) {
+      setError("Please enter an account name.");
+      return;
+    }
     setLoading(true);
     setError("");
     try {
       const res = await api("/api/user", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ accountName, onboarded: true }),
+        body: JSON.stringify({ accountName: trimmed, onboarded: true }),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.message || "Failed to set account name.");
       }
-      router.push("/dashboard");
+      router.replace("/dashboard");
     } catch (err) {
       setError(err.message);
     } finally {
@@ -105,10 +122,10 @@ export default function WelcomePage() {
           <button
             type="button"
             onClick={skip}
-            disabled={loading}
-            className="w-full text-xs text-center text-zinc-500 hover:text-zinc-300 transition-colors"
+            disabled={loading || skipping}
+            className="w-full text-xs text-center text-zinc-500 hover:text-zinc-300 transition-colors disabled:opacity-50"
           >
-            Skip for now
+            {skipping ? "Skipping…" : "Skip for now"}
           </button>
         </div>
       </div>

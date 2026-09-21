@@ -3,7 +3,7 @@
 > **Open items: none.**
 >
 > Both audit cycles (2026-08-22) are fully closed — every finding was fixed,
-> covered by tests (`npm test` → 191/191 via `test/run-all.test.js`), and
+> covered by tests (`npm test` → 223/223 via `test/run-all.test.js`), and
 > committed. Full fix history lives in git log; details in
 > `docs/architecture.md` and `docs/suggestions.md`.
 
@@ -11,7 +11,7 @@
 
 ## Standing verification
 
-- `npm run lint` — 0 problems · `npm run build` — clean · `npm test` — 191/191
+- `npm run lint` — 0 problems · `npm run build` — clean · `npm test` — 223/223
 - Production smoke matrix (anon/authed × `/`, `/login`, `/welcome`, `/dashboard`, `/api/*`) verified in cycle 1
 - CSP nonce present on all page HTML tags in production output
 

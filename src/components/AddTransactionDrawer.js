@@ -58,7 +58,36 @@ export default function AddTransactionDrawer({
   const [categories, setCategories] = useState({ expense: [], income: [], allCustom: [] });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [categoryError, setCategoryError] = useState("");
   const panelRef = useRef(null);
+
+  // Draft safety: an accidental dismiss (Escape/backdrop/X) used to wipe
+  // in-progress input. Persist to localStorage while open, restore on open,
+  // clear only after a successful submit. All storage access is guarded —
+  // private mode / SSR must never crash the drawer.
+  // NOTE: `type` is deliberately NOT restored — a stale income/expense flag
+  // would pair the draft category with the wrong list and block submit on
+  // the required select. The drawer always reopens on expense.
+  const DRAFT_KEY = "fintrack-add-tx-draft-v1";
+  // Persist must not run before the open-time restore has read the stored
+  // draft — on reopen the first persist would otherwise clobber it with
+  // blank defaults before the deferred restore microtask runs.
+  const restoredRef = useRef(false);
+  const restoreDraft = () => {
+    try {
+      const raw = typeof localStorage !== "undefined" ? localStorage.getItem(DRAFT_KEY) : null;
+      if (!raw) return;
+      const d = JSON.parse(raw);
+      if (!d || typeof d !== "object") return;
+      if (typeof d.amount === "string") setAmount(d.amount);
+      if (typeof d.category === "string") setCategory(d.category);
+      if (typeof d.date === "string" && d.date) setDate(d.date);
+      if (typeof d.description === "string") setDescription(d.description);
+      if (typeof d.excludeFromBudget === "boolean") setExcludeFromBudget(d.excludeFromBudget);
+    } catch {
+      // corrupt draft — start fresh
+    }
+  };
 
   const fetchCategories = () => {
     api("/api/categories")
@@ -66,20 +95,65 @@ export default function AddTransactionDrawer({
         if (!res.ok) throw new Error("Failed to load categories");
         return res.json();
       })
-      .then((data) => setCategories(data))
-      .catch((err) => console.error("Failed to fetch categories:", err));
+      .then((data) => {
+        setCategories(data);
+        setCategoryError("");
+      })
+      // Surface it next to the select: without options the required field
+      // blocks submit with only a native tooltip and the user is stuck.
+      .catch((err) => {
+        console.error("Failed to fetch categories:", err);
+        setCategoryError("Couldn't load categories. Reopen the drawer to retry.");
+      });
   };
 
   useEffect(() => {
     if (isOpen) {
       fetchCategories();
+      // Deferred (not synchronous) draft apply: restoring state in the same
+      // commit as the open would cascade renders; applying on a microtask
+      // lets the drawer paint first, then hydrate the draft.
+      restoredRef.current = false;
+      let cancelled = false;
+      Promise.resolve().then(() => {
+        if (cancelled) return;
+        restoreDraft();
+        restoredRef.current = true;
+      });
+      return () => {
+        cancelled = true;
+      };
     }
+    return undefined;
   }, [isOpen]);
+
+  // Persist the in-progress draft while the drawer is open (only after the
+  // open-time restore has run — see restoredRef above).
+  useEffect(() => {
+    if (!isOpen || !restoredRef.current) return;
+    try {
+      localStorage.setItem(
+        DRAFT_KEY,
+        JSON.stringify({ amount, category, date, description, excludeFromBudget })
+      );
+    } catch {
+      // storage unavailable — the drawer still works, just without drafts
+    }
+  }, [isOpen, amount, category, date, description, excludeFromBudget]);
+
+  const clearDraft = () => {
+    try {
+      localStorage.removeItem(DRAFT_KEY);
+    } catch {
+    }
+  };
 
   const handleTypeChange = (value) => {
     setType(value);
     setCategory("");
     setIsAddingNewCategory(false);
+    // A stale one-time flag must not leak into income payloads.
+    if (value === "income") setExcludeFromBudget(false);
   };
 
   const handleCategoryChange = (e) => {
@@ -147,6 +221,7 @@ export default function AddTransactionDrawer({
       }
 
       onTransactionAdded();
+      clearDraft();
       handleClose();
     } catch (err) {
       setError(err.message);
@@ -165,6 +240,7 @@ export default function AddTransactionDrawer({
     setDescription("");
     setExcludeFromBudget(false);
     setError("");
+    setCategoryError("");
   }, []);
 
   const handleClose = useCallback(() => {
@@ -294,6 +370,11 @@ export default function AddTransactionDrawer({
                     + Add New Category
                   </option>
                 </select>
+                {categoryError && (
+                  <p className="mt-1.5 text-[11px] font-medium text-amber-300">
+                    {categoryError}
+                  </p>
+                )}
               </div>
 
               {isAddingNewCategory && (

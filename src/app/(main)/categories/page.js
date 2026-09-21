@@ -2,7 +2,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Plus, Trash2, Pencil, Tags, Check, X, Tag, FolderPlus } from "lucide-react";
+import { Plus, Trash2, Pencil, Tags } from "lucide-react";
 import api from "@/lib/api";
 import { defaultExpenseCategories, defaultIncomeCategories } from "@/lib/constants";
 

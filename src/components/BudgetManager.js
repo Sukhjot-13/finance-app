@@ -25,7 +25,12 @@ export default function BudgetManager({ isOpen, onClose, onSaved }) {
   useDialogA11y({ ref: panelRef, isOpen, onClose: handleClose });
 
   const fmt = (amount) => formatCurrency(amount, user?.currency);
-  const month = getCurrentMonth();
+  // Snapshot the month when the drawer OPENS: a drawer left open across a
+  // month boundary must not refetch into a new month and overwrite unsaved
+  // draft inputs mid-edit. A ref (not state) holds the snapshot — no extra
+  // render, no effect loop.
+  const activeMonthRef = useRef(getCurrentMonth());
+  const month = activeMonthRef.current;
 
   function handleClose() {
     setError("");
@@ -36,6 +41,8 @@ export default function BudgetManager({ isOpen, onClose, onSaved }) {
   useEffect(() => {
     if (!isOpen) return;
 
+    activeMonthRef.current = getCurrentMonth();
+    const fetchMonth = activeMonthRef.current;
     let cancelled = false;
 
     Promise.all([
@@ -43,7 +50,7 @@ export default function BudgetManager({ isOpen, onClose, onSaved }) {
         if (!res.ok) throw new Error("Failed to load categories");
         return res.json();
       }),
-      api(`/api/budgets?month=${month}`).then(async (res) => {
+      api(`/api/budgets?month=${fetchMonth}`).then(async (res) => {
         if (!res.ok) throw new Error("Failed to load budgets");
         return res.json();
       }),
@@ -67,12 +74,16 @@ export default function BudgetManager({ isOpen, onClose, onSaved }) {
     return () => {
       cancelled = true;
     };
-  }, [isOpen, month, attempt]);
+  }, [isOpen, attempt]);
 
+  // Store the RAW input (strings, not parseFloat): parsing here turns
+  // typos into NaN, which React number inputs render unpredictably and the
+  // old hasValue() then mistook for "cleared" — silently deleting the
+  // budget on save. Validation + conversion happen once, in handleSave.
   const setBudget = (category, amount) => {
     setBudgets((prev) => ({
       ...prev,
-      [category]: amount === "" ? "" : parseFloat(amount),
+      [category]: amount,
     }));
   };
 
@@ -86,58 +97,89 @@ export default function BudgetManager({ isOpen, onClose, onSaved }) {
     }
   };
 
-  const handleRemove = async (category) => {
+  // Trash only clears the FIELD — nothing touches the server until Save,
+  // matching the drawer's own copy ("Clearing a field removes that budget
+  // when you save"). Instant server deletes here used to contradict that
+  // and made a stray click destructive with no confirm.
+  const handleRemove = (category) => {
     setError("");
-    try {
-      await deleteBudgetOnServer(category);
-      setBudgets((prev) => {
-        const next = { ...prev };
-        delete next[category];
-        return next;
-      });
-      setOriginalBudgets((prev) => {
-        const next = { ...prev };
-        delete next[category];
-        return next;
-      });
-      onSaved?.();
-    } catch (err) {
-      console.error("Failed to remove budget:", err);
-      setError(err.message || "Failed to remove budget.");
-    }
+    setBudgets((prev) => ({ ...prev, [category]: "" }));
   };
 
-  const hasValue = (v) => v !== "" && v != null && v > 0;
+  // Cleared (or never-set) — eligible for server-side deletion on save.
+  const isCleared = (v) => v === "" || v == null;
+  // Has a real value (validated separately — 0/negative/NaN are ERRORS,
+  // not clears, so a typo can't silently delete a budget).
+  const hasValue = (v) => !isCleared(v);
 
   const handleSave = async (e) => {
     e.preventDefault();
     setSaving(true);
     setError("");
     try {
+      // Validate FIRST: 0, negatives, and non-numeric input are user errors
+      // naming the category — never silent deletes.
+      const invalid = Object.entries(budgets).filter(([, v]) => {
+        if (isCleared(v)) return false;
+        const n = Number(v);
+        return !Number.isFinite(n) || n < 1;
+      });
+      if (invalid.length > 0) {
+        throw new Error(
+          `Invalid amount for ${invalid.map(([c]) => c).join(", ")}: enter 1 or more, or clear the field to remove it.`
+        );
+      }
+
       const entries = Object.entries(budgets).filter(([, amount]) => hasValue(amount));
+      // Upserts first, one result per category so failures name names.
+      // Nothing is deleted until every upsert succeeds.
       const upsertResults = await Promise.all(
-        entries.map(([category, amount]) =>
-          api("/api/budgets", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ category, amount, month }),
-          })
-        )
+        entries.map(async ([category, amount]) => {
+          try {
+            const res = await api("/api/budgets", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ category, amount: Number(amount), month }),
+            });
+            if (!res.ok) {
+              const data = await res.json().catch(() => ({}));
+              return { category, ok: false, message: data.message || "save failed" };
+            }
+            return { category, ok: true };
+          } catch (err) {
+            return { category, ok: false, message: err.message || "network error" };
+          }
+        })
       );
-      if (upsertResults.some((res) => !res.ok)) {
-        throw new Error("One or more budgets failed to save. Please try again.");
+      const failedUpserts = upsertResults.filter((r) => !r.ok);
+      if (failedUpserts.length > 0) {
+        throw new Error(
+          `Could not save ${failedUpserts.map((f) => f.category).join(", ")} (${failedUpserts[0].message}). Nothing was deleted — fix and retry.`
+        );
       }
 
       const cleared = Object.keys(originalBudgets).filter(
-        (cat) => !hasValue(budgets[cat])
+        (cat) => isCleared(budgets[cat])
       );
       const deleteResults = await Promise.allSettled(
         cleared.map((cat) => deleteBudgetOnServer(cat))
       );
-      if (deleteResults.some((r) => r.status === "rejected")) {
-        throw new Error("Some removed budgets could not be deleted. Please retry.");
+      const failedDeletes = cleared.filter(
+        (_, i) => deleteResults[i].status === "rejected"
+      );
+      if (failedDeletes.length > 0) {
+        throw new Error(
+          `Could not remove ${failedDeletes.join(", ")}. Your other budgets were saved — please retry.`
+        );
       }
 
+      // Refresh the snapshot, dropping cleared keys — otherwise a second
+      // Save would re-DELETE already-removed budgets (now 404s) and error.
+      const next = {};
+      for (const [cat, v] of Object.entries(budgets)) {
+        if (hasValue(v)) next[cat] = v;
+      }
+      setOriginalBudgets(next);
       onSaved?.();
       onClose();
     } catch (err) {

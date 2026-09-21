@@ -47,11 +47,27 @@ export async function POST(request) {
 
   try {
     await dbConnect();
-    const { name, type } = await request.json();
+    let body;
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json(
+        { message: "Invalid request body" },
+        { status: 400 }
+      );
+    }
+    const { name, type } = body || {};
 
     if (!name || typeof name !== "string" || !name.trim() || !type) {
       return NextResponse.json(
         { message: "Category name and type are required" },
+        { status: 400 }
+      );
+    }
+
+    if (type !== "expense" && type !== "income") {
+      return NextResponse.json(
+        { message: "Category type must be 'expense' or 'income'" },
         { status: 400 }
       );
     }
@@ -73,10 +89,12 @@ export async function POST(request) {
         { status: 409 }
       );
     }
+    // Infrastructure failures are 500s (retryable) — never 400s, which would
+    // mislead clients into thinking their input was wrong.
     console.error("Create category error:", error.message);
     return NextResponse.json(
       { message: "Error creating category" },
-      { status: 400 }
+      { status: 500 }
     );
   }
 }

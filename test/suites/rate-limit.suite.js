@@ -72,4 +72,42 @@ describe("rate-limit lib", () => {
     await expect(popLastHit("k")).resolves.toBeUndefined();
     await expect(resetKey("k")).resolves.toBeUndefined();
   });
+
+  it("getClientIp prefers x-real-ip over spoofable x-forwarded-for", async () => {
+    const { getClientIp } = await loadLib();
+    const req = (headers) => ({ headers: new Headers(headers) });
+
+    expect(getClientIp(req({ "x-real-ip": "9.9.9.9", "x-forwarded-for": "1.1.1.1" }))).toBe("9.9.9.9");
+    // without x-real-ip: LAST forwarded entry (edge-appended), not the first
+    expect(getClientIp(req({ "x-forwarded-for": "spoofed, 2.2.2.2" }))).toBe("2.2.2.2");
+    expect(getClientIp(req({ "x-forwarded-for": "3.3.3.3" }))).toBe("3.3.3.3");
+    expect(getClientIp(req({}))).toBe("unknown");
+  });
+
+  it("recordHitAndCount allows up to max, denies beyond, and fails open", async () => {
+    const { recordHitAndCount } = await loadLib();
+
+    // at the cap → still allowed
+    RL.updateOne.mockResolvedValueOnce({});
+    RL.aggregate.mockResolvedValueOnce([{ n: 5 }]);
+    await expect(recordHitAndCount("k", 60_000, 5)).resolves.toMatchObject({
+      allowed: true,
+      count: 5,
+    });
+
+    // one over → denied
+    RL.updateOne.mockResolvedValueOnce({});
+    RL.aggregate.mockResolvedValueOnce([{ n: 6 }]);
+    await expect(recordHitAndCount("k", 60_000, 5)).resolves.toMatchObject({
+      allowed: false,
+      count: 6,
+    });
+
+    // DB down → fail open
+    RL.updateOne.mockRejectedValueOnce(new Error("db down"));
+    await expect(recordHitAndCount("k", 60_000, 5)).resolves.toMatchObject({
+      allowed: true,
+      count: 0,
+    });
+  });
 });

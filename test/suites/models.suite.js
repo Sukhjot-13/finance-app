@@ -99,6 +99,12 @@ describe("Budget schema", () => {
     const bad = new Budget({ userId: "64b64b64b64b64b64b64b64b", category: "Food", amount: 10, month: "2026-1" });
     expect(bad.validateSync()?.errors.month).toBeDefined();
 
+    // impossible calendar months are rejected too (old regex allowed 2026-13)
+    for (const month of ["2026-13", "2026-00"]) {
+      const impossible = new Budget({ userId: "64b64b64b64b64b64b64b64b", category: "Food", amount: 10, month });
+      expect(impossible.validateSync()?.errors.month).toBeDefined();
+    }
+
     const good = new Budget({ userId: "64b64b64b64b64b64b64b64b", category: "Food", amount: 10, month: "2026-08" });
     expect(good.validateSync()).toBeUndefined();
   });

@@ -7,9 +7,9 @@ import User from "@/models/user.model";
 import { NextResponse } from "next/server";
 import { TransactionalEmailsApi, SendSmtpEmail } from "@getbrevo/brevo";
 import {
-  recordHit,
-  countRecentHits,
+  recordHitAndCount,
   popLastHit,
+  getClientIp,
 } from "@/lib/rate-limit";
 
 // Sliding-window limits backed by MongoDB (shared across instances).
@@ -17,12 +17,6 @@ const EMAIL_WINDOW_MS = 60 * 60 * 1000; // 1 hour
 const EMAIL_MAX = 5; // per email address
 const IP_WINDOW_MS = 60 * 60 * 1000; // 1 hour
 const IP_MAX = 20; // per IP — stops OTP-bombing many addresses at once
-
-function getClientIp(request) {
-  const forwarded = request.headers.get("x-forwarded-for");
-  if (forwarded) return forwarded.split(",")[0].trim();
-  return request.headers.get("x-real-ip") || "unknown";
-}
 
 /**
  * Finds a user by email. New accounts are always stored lowercased; the
@@ -38,9 +32,18 @@ async function findUserByEmail(email) {
 }
 
 export async function POST(request) {
+  let email;
+  try {
+    ({ email } = await request.json());
+  } catch {
+    return NextResponse.json(
+      { message: "Invalid request body." },
+      { status: 400 }
+    );
+  }
+
   try {
     await dbConnect();
-    const { email } = await request.json();
 
     if (!email) {
       return NextResponse.json(
@@ -59,23 +62,21 @@ export async function POST(request) {
     }
 
     // Rate limiting — per email AND per sender IP, stored in MongoDB so the
-    // counters are shared across instances and survive restarts.
+    // counters are shared across instances and survive restarts. Recorded
+    // BEFORE the decision (record-then-count) so concurrent bursts cannot
+    // slip under the cap; slots are refunded below if the email send fails.
     const emailKey = `otp-send:${email.toLowerCase()}`;
     const ipKey = `otp-send-ip:${getClientIp(request)}`;
-    const [recentByEmail, recentByIp] = await Promise.all([
-      countRecentHits(emailKey, EMAIL_WINDOW_MS),
-      countRecentHits(ipKey, IP_WINDOW_MS),
+    const [emailRes, ipRes] = await Promise.all([
+      recordHitAndCount(emailKey, EMAIL_WINDOW_MS, EMAIL_MAX),
+      recordHitAndCount(ipKey, IP_WINDOW_MS, IP_MAX),
     ]);
-    if (recentByEmail >= EMAIL_MAX || recentByIp >= IP_MAX) {
+    if (!emailRes.allowed || !ipRes.allowed) {
       return NextResponse.json(
         { message: "Too many OTP requests. Please wait before trying again." },
         { status: 429 }
       );
     }
-    await Promise.all([
-      recordHit(emailKey, EMAIL_WINDOW_MS),
-      recordHit(ipKey, IP_WINDOW_MS),
-    ]);
 
     // Cryptographically secure 6-digit OTP (Math.random() is predictable)
     const otp = randomInt(100000, 1000000).toString();

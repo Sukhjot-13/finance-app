@@ -10,7 +10,7 @@ import {
 } from "@/lib/auth";
 import { cookies } from "next/headers";
 import dbConnect from "@/lib/mongodb";
-import { recordHit, countRecentHits, resetKey } from "@/lib/rate-limit";
+import { recordHitAndCount, resetKey, getClientIp } from "@/lib/rate-limit";
 
 // Brute-force protection, backed by MongoDB so it is shared across
 // instances and survives restarts. 5 failed attempts per email inside a
@@ -20,12 +20,6 @@ const VERIFY_WINDOW_MS = 15 * 60 * 1000;
 const VERIFY_MAX_ATTEMPTS = 5;
 const VERIFY_IP_WINDOW_MS = 15 * 60 * 1000;
 const VERIFY_IP_MAX_ATTEMPTS = 25;
-
-function getClientIp(request) {
-  const forwarded = request.headers.get("x-forwarded-for");
-  if (forwarded) return forwarded.split(",")[0].trim();
-  return request.headers.get("x-real-ip") || "unknown";
-}
 
 // bcrypt hash of a throwaway string. Compared against when no real OTP
 // exists so the endpoint's timing is identical either way.
@@ -65,14 +59,17 @@ export async function POST(req) {
 
     const attemptKey = `otp-verify:${String(email).trim().toLowerCase()}`;
     const ipKey = `otp-verify-ip:${getClientIp(req)}`;
-    const [recentFailures, recentIpFailures] = await Promise.all([
-      countRecentHits(attemptKey, VERIFY_WINDOW_MS),
-      countRecentHits(ipKey, VERIFY_IP_WINDOW_MS),
+    // Record-then-count (atomic against bursts): the attempt is already
+    // recorded before the lockout decision, so no extra recordHit is needed
+    // on the failure path below.
+    const [emailRes, ipRes] = await Promise.all([
+      recordHitAndCount(attemptKey, VERIFY_WINDOW_MS, VERIFY_MAX_ATTEMPTS),
+      recordHitAndCount(ipKey, VERIFY_IP_WINDOW_MS, VERIFY_IP_MAX_ATTEMPTS),
     ]);
 
     // Reject cheaply while locked out — identical message as any other
     // failure so attackers learn nothing extra.
-    if (recentFailures >= VERIFY_MAX_ATTEMPTS || recentIpFailures >= VERIFY_IP_MAX_ATTEMPTS) {
+    if (!emailRes.allowed || !ipRes.allowed) {
       return sendError(
         "Too many failed attempts. Please try again later.",
         429
@@ -101,17 +98,17 @@ export async function POST(req) {
     }
 
     if (failureMessage) {
-      await Promise.all([
-        recordHit(attemptKey, VERIFY_WINDOW_MS),
-        recordHit(ipKey, VERIFY_IP_WINDOW_MS),
-      ]);
+      // Already recorded by recordHitAndCount above — just return.
       return sendError(failureMessage, 400);
     }
 
-    // Success — clear OTP fields and this email's failure history
+    // Success — clear OTP fields and BOTH failure histories (email AND IP:
+    // without the IP reset, users behind shared NAT/CGNAT would inherit
+    // strangers' failures and keep 429ing after a correct OTP).
     user.otp = undefined;
     user.otpExpires = undefined;
     resetKey(attemptKey).catch(() => {});
+    resetKey(ipKey).catch(() => {});
 
     // Generate tokens
     const accessToken = generateAccessToken(user._id);

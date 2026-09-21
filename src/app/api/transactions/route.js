@@ -56,8 +56,18 @@ export async function GET(req) {
       query.$or = [{ description: pattern }, { category: pattern }];
     }
 
-    const from = parseInstant(searchParams.get("from"));
-    const to = parseInstant(searchParams.get("to"));
+    const fromRaw = searchParams.get("from");
+    const toRaw = searchParams.get("to");
+    const from = fromRaw ? parseInstant(fromRaw) : null;
+    const to = toRaw ? parseInstant(toRaw) : null;
+    // Present-but-unparseable bounds are a client bug: 400 instead of
+    // silently returning unfiltered data the user thinks is filtered.
+    if ((fromRaw && !from) || (toRaw && !to)) {
+      return NextResponse.json(
+        { message: "Invalid date filter. Use ISO date strings." },
+        { status: 400 }
+      );
+    }
     if (from || to) {
       query.date = {};
       if (from) query.date.$gte = from;
@@ -97,7 +107,21 @@ export async function POST(req) {
     }
 
     await dbConnect();
-    const body = await req.json();
+    let body;
+    try {
+      body = await req.json();
+    } catch {
+      return NextResponse.json(
+        { message: "Invalid request body" },
+        { status: 400 }
+      );
+    }
+    if (!body || typeof body !== "object") {
+      return NextResponse.json(
+        { message: "Invalid request body" },
+        { status: 400 }
+      );
+    }
     
     // Input validation
     const { type, amount, category, date, description, excludeFromBudget } = body;
@@ -126,6 +150,13 @@ export async function POST(req) {
     if (!date || isNaN(Date.parse(date))) {
       return NextResponse.json(
         { message: "Valid date is required" },
+        { status: 400 }
+      );
+    }
+
+    if (description !== undefined && typeof description !== "string") {
+      return NextResponse.json(
+        { message: "Description must be a string" },
         { status: 400 }
       );
     }

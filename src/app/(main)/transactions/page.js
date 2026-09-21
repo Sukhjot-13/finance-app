@@ -5,7 +5,7 @@ import { useState, useEffect, useContext, useRef } from "react";
 import { formatCurrency, formatDate, formatDateForInput } from "@/lib/utils";
 import api from "@/lib/api";
 import { useDialogA11y } from "@/lib/useDialogA11y";
-import { Trash2, Edit, X, Search, Filter, ArrowUpRight, ArrowDownRight, Calendar, ArrowLeft, ArrowRight } from "lucide-react";
+import { Trash2, Edit, X, Search, ArrowLeft, ArrowRight } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { UserContext } from "@/app/(main)/layout";
 
@@ -33,6 +33,9 @@ export function EditTransactionModal({ transaction, onClose, onSave }) {
         setCategories(data);
       } catch (err) {
         console.error("Failed to fetch categories:", err);
+        // Surface it: without options the required select blocks submit
+        // with no explanation and the user is stuck.
+        setModalError("Could not load categories. Please close and try again.");
       }
     };
     fetchCategories();
@@ -121,7 +124,7 @@ export function EditTransactionModal({ transaction, onClose, onSave }) {
       >
         <div className="flex justify-between items-center mb-5 pb-3 border-b border-zinc-800">
           <h2 className="text-base font-bold tracking-tight text-zinc-100">Edit Transaction</h2>
-          <button onClick={onClose} className="p-1 text-zinc-400 hover:text-zinc-200 rounded-lg hover:bg-zinc-800/60 transition-colors">
+          <button onClick={onClose} className="p-1 text-zinc-400 hover:text-zinc-200 rounded-lg hover:bg-zinc-800/60 transition-colors" aria-label="Close edit dialog">
             <X size={18} />
           </button>
         </div>
@@ -140,10 +143,13 @@ export function EditTransactionModal({ transaction, onClose, onSave }) {
                   key={t}
                   type="button"
                   onClick={() => {
+                    // Keep the selection when the name exists in the other
+                    // type's list — wiping it unconditionally loses input.
+                    const nextCats = t === 'expense' ? categories.expense : categories.income;
                     setFormData((prev) => ({
                       ...prev,
                       type: t,
-                      category: "",
+                      category: nextCats?.includes(prev.category) ? prev.category : "",
                       ...(t === "income" ? { excludeFromBudget: false } : {}),
                     }));
                     setIsAddingNewCategory(false);
@@ -361,8 +367,10 @@ export default function TransactionsPage() {
   const [pageInfo, setPageInfo] = useState({ page: 1, totalPages: 1, total: 0 });
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [editingTransaction, setEditingTransaction] = useState(null);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [deletingId, setDeletingId] = useState(null);
   const [filters, setFilters] = useState({
     search: "",
@@ -381,26 +389,43 @@ export default function TransactionsPage() {
   }, [filters.search]);
 
   useEffect(() => {
-    let cancelled = false;
-    api("/api/categories")
-      .then((res) => {
+    const fetchCategories = async () => {
+      try {
+        const res = await api("/api/categories");
         if (!res.ok) throw new Error("Failed to load categories");
-        return res.json();
-      })
-      .then((data) => {
-        if (cancelled) return;
-        const names = [
-          ...new Set([...(data.expense || []), ...(data.income || [])]),
-        ].sort((a, b) => a.localeCompare(b));
-        setCategoryOptions(names);
-      })
-      .catch((err) =>
-        console.error("Failed to load category options:", err)
-      );
+        const data = await res.json();
+        return data;
+      } catch (err) {
+        console.error("Failed to load category options:", err);
+        return null;
+      }
+    };
+    let cancelled = false;
+    fetchCategories().then((data) => {
+      if (cancelled || !data) return;
+      const names = [
+        ...new Set([...(data.expense || []), ...(data.income || [])]),
+      ].sort((a, b) => a.localeCompare(b));
+      setCategoryOptions(names);
+    });
     return () => {
       cancelled = true;
     };
   }, []);
+
+  const refreshCategoryOptions = async () => {
+    try {
+      const res = await api("/api/categories");
+      if (!res.ok) return;
+      const data = await res.json();
+      const names = [
+        ...new Set([...(data.expense || []), ...(data.income || [])]),
+      ].sort((a, b) => a.localeCompare(b));
+      setCategoryOptions(names);
+    } catch (err) {
+      console.error("Failed to refresh category options:", err);
+    }
+  };
 
   const buildQueryString = (targetPage) => {
     const params = new URLSearchParams();
@@ -409,23 +434,26 @@ export default function TransactionsPage() {
     if (debouncedSearch.trim()) params.set("search", debouncedSearch.trim());
     if (filters.type !== "all") params.set("type", filters.type);
     if (filters.category !== "all") params.set("category", filters.category);
+    // Defensive: a malformed date string would make .toISOString() throw
+    // inside render — skip the bound instead of crashing the page.
     if (filters.startDate) {
-      params.set(
-        "from",
-        new Date(filters.startDate + "T00:00:00").toISOString()
-      );
+      const d = new Date(filters.startDate + "T00:00:00");
+      if (!isNaN(d.getTime())) params.set("from", d.toISOString());
     }
     if (filters.endDate) {
-      params.set(
-        "to",
-        new Date(filters.endDate + "T23:59:59.999").toISOString()
-      );
+      const d = new Date(filters.endDate + "T23:59:59.999");
+      if (!isNaN(d.getTime())) params.set("to", d.toISOString());
     }
     return params.toString();
   };
 
+  const firstLoad = useRef(false);
+
   useEffect(() => {
     let cancelled = false;
+    // Background refetches (filter/page changes) show a subtle indicator
+    // instead of swapping in skeletons — the stale list stays readable.
+    if (firstLoad.current) setRefreshing(true);
     api(`/api/transactions?${buildQueryString(page)}`)
       .then((res) => {
         if (!res.ok) throw new Error("Failed to fetch");
@@ -446,7 +474,10 @@ export default function TransactionsPage() {
         if (!cancelled) setError("Failed to load transactions.");
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (cancelled) return;
+        firstLoad.current = true;
+        setLoading(false);
+        setRefreshing(false);
       });
     return () => {
       cancelled = true;
@@ -478,11 +509,19 @@ export default function TransactionsPage() {
         return res.json();
       })
       .then((data) => {
+        const totalPages = data.totalPages || 1;
+        // The result set may have shrunk (deletes, edits moving rows out of
+        // the filter, another tab) — clamp instead of stranding an empty,
+        // looks-deleted page. The page effect refetches after setPage.
+        if (page > totalPages) {
+          setPage(Math.max(totalPages, 1));
+          return;
+        }
         setTransactions(data.transactions || []);
         setPageInfo((prev) => ({
           ...prev,
           total: data.total ?? prev.total,
-          totalPages: data.totalPages || prev.totalPages,
+          totalPages,
         }));
         setError("");
       })
@@ -508,6 +547,31 @@ export default function TransactionsPage() {
     }
   };
 
+  // Did the saved values move the row outside the active filters? If so
+  // the row vanishes on refetch — tell the user it moved, not that it
+  // was deleted.
+  const savedOutsideFilters = (saved) => {
+    if (filters.type !== "all" && saved.type !== filters.type) return true;
+    if (filters.category !== "all" && saved.category !== filters.category) return true;
+    const q = debouncedSearch.trim().toLowerCase();
+    if (
+      q &&
+      !`${saved.description || ""} ${saved.category || ""}`.toLowerCase().includes(q)
+    ) {
+      return true;
+    }
+    const savedTime = new Date(saved.date).getTime();
+    if (filters.startDate) {
+      const from = new Date(filters.startDate + "T00:00:00").getTime();
+      if (!isNaN(from) && savedTime < from) return true;
+    }
+    if (filters.endDate) {
+      const to = new Date(filters.endDate + "T23:59:59.999").getTime();
+      if (!isNaN(to) && savedTime > to) return true;
+    }
+    return false;
+  };
+
   const handleSaveEdit = async (id, updatedFields) => {
     try {
       const res = await api(`/api/transactions/${id}`, {
@@ -520,13 +584,20 @@ export default function TransactionsPage() {
         try {
           const data = await res.json();
           if (data?.message) message = data.message;
+          else if (data?.error) message = data.error;
         } catch {
         }
         throw new Error(message);
       }
       setEditingTransaction(null);
       setError("");
+      setNotice(
+        savedOutsideFilters(updatedFields)
+          ? "Saved — that transaction no longer matches your current filters."
+          : ""
+      );
       refetchCurrentPage();
+      refreshCategoryOptions();
       return { ok: true };
     } catch (err) {
       console.error("Error updating transaction:", err);
@@ -576,6 +647,23 @@ export default function TransactionsPage() {
             <button onClick={() => setError("")} className="text-xs underline text-rose-400 hover:text-rose-200">
               Dismiss
             </button>
+          </div>
+        )}
+
+        {/* Inline notice (e.g. saved row moved out of the active filters) */}
+        {notice && (
+          <div className="p-3.5 bg-sky-500/10 border border-sky-500/30 rounded-xl text-xs font-medium text-sky-300 flex items-center justify-between gap-2 flex-wrap">
+            <span>{notice}</span>
+            <div className="flex items-center gap-3">
+              {hasActiveFilters && (
+                <button onClick={clearFilters} className="text-xs underline text-sky-400 hover:text-sky-200 font-semibold">
+                  Clear filters
+                </button>
+              )}
+              <button onClick={() => setNotice("")} className="text-xs underline text-sky-400 hover:text-sky-200">
+                Dismiss
+              </button>
+            </div>
           </div>
         )}
 
@@ -633,6 +721,7 @@ export default function TransactionsPage() {
             <span>
               <span className="font-bold text-zinc-200">{pageInfo.total}</span> transaction{pageInfo.total !== 1 ? "s" : ""}
               {hasActiveFilters ? " match your filters" : ""}
+              {refreshing && <span className="ml-2 font-mono text-emerald-400 animate-pulse">Updating…</span>}
             </span>
             {pageInfo.totalPages > 1 && (
               <span className="font-mono text-zinc-500">
@@ -716,6 +805,7 @@ export default function TransactionsPage() {
                           onClick={() => setEditingTransaction(t)}
                           className="p-1.5 text-zinc-400 hover:text-emerald-400 rounded-lg hover:bg-zinc-800/60 transition-colors"
                           title="Edit"
+                          aria-label="Edit transaction"
                         >
                           <Edit size={15} />
                         </button>
@@ -723,6 +813,7 @@ export default function TransactionsPage() {
                           onClick={() => setDeletingId(t._id)}
                           className="p-1.5 text-zinc-400 hover:text-rose-400 rounded-lg hover:bg-zinc-800/60 transition-colors"
                           title="Delete"
+                          aria-label="Delete transaction"
                         >
                           <Trash2 size={15} />
                         </button>

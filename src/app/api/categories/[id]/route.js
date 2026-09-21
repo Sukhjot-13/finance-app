@@ -33,7 +33,16 @@ export async function PUT(request, { params }) {
 
     await dbConnect();
 
-    const { name } = await request.json();
+    let body;
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json(
+        { message: "Invalid request body" },
+        { status: 400 }
+      );
+    }
+    const { name } = body || {};
 
     if (!name || typeof name !== "string" || !name.trim()) {
       return NextResponse.json(
@@ -61,6 +70,21 @@ export async function PUT(request, { params }) {
     const oldName = category.name;
     if (oldName === newName) {
       return NextResponse.json(category, { status: 200 });
+    }
+
+    // Budgets are keyed {userId,category,month} WITHOUT a type, while the
+    // category key includes the type. Renaming A(expense)→B when ANY budget
+    // already lives under B would duplicate-key mid-cascade and split-brain
+    // the rename — reject upfront instead.
+    const budgetCollision = await Budget.findOne({
+      userId: user._id,
+      category: newName,
+    });
+    if (budgetCollision) {
+      return NextResponse.json(
+        { message: "A budget with this name already exists" },
+        { status: 409 }
+      );
     }
 
     // --- Transactional path ---
@@ -149,10 +173,28 @@ export async function PUT(request, { params }) {
         { $set: { category: newName } }
       );
     } catch (cascadeError) {
-      // Roll back the rename so nothing references a label that doesn't
-      // exist yet. If even the rollback fails, surface the original error —
-      // retrying the same rename is safe either way.
+      // Roll back EVERYTHING the cascade touched (transactions AND budgets),
+      // then the rename itself — otherwise a partial cascade leaves a
+      // split-brain: category doc on the old name, rows on the new one.
+      // All best-effort: if even the rollback fails, surface the original
+      // error — retrying the same rename is safe either way.
       console.error("Rename cascade failed, rolling back:", cascadeError.message);
+      try {
+        await Transaction.updateMany(
+          { userId: user._id, category: newName },
+          { $set: { category: oldName } }
+        );
+      } catch (revertError) {
+        console.error("Rename transaction-revert failed:", revertError.message);
+      }
+      try {
+        await Budget.updateMany(
+          { userId: user._id, category: newName },
+          { $set: { category: oldName } }
+        );
+      } catch (revertError) {
+        console.error("Rename budget-revert failed:", revertError.message);
+      }
       category.name = oldName;
       try {
         await category.save();
@@ -205,11 +247,30 @@ export async function DELETE(request, { params }) {
       );
     }
 
-    await Transaction.updateMany(
-      { userId: user._id, category: category.name },
-      { $set: { category: "Other" } }
-    );
-    await Budget.deleteMany({ userId: user._id, category: category.name });
+    // Cascades run after the delete — on failure, best-effort restore the
+    // category doc (same _id) so rows never reference a missing category
+    // and a retry stays possible. Restore failures only log.
+    try {
+      await Transaction.updateMany(
+        { userId: user._id, category: category.name },
+        { $set: { category: "Other" } }
+      );
+      await Budget.deleteMany({ userId: user._id, category: category.name });
+    } catch (cascadeError) {
+      console.error("Category delete cascade failed, restoring:", cascadeError.message);
+      try {
+        const restore = new Category({
+          _id: category._id,
+          userId: category.userId,
+          name: category.name,
+          type: category.type,
+        });
+        await restore.save();
+      } catch (restoreError) {
+        console.error("Category delete-restore failed:", restoreError.message);
+      }
+      throw cascadeError;
+    }
 
     return NextResponse.json(
       { message: "Category deleted successfully. Transactions reassigned to Other." },

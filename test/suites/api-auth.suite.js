@@ -75,8 +75,17 @@ describe("POST /api/auth/otp/send", () => {
     }
   });
 
+  it("returns a controlled 400 on malformed JSON bodies", async () => {
+    const { POST } = await loadSend();
+    const res = await POST(
+      jsonReq("http://localhost/api/auth/otp/send", "{this is not json")
+    );
+    expect(res.status).toBe(400);
+    expect(U().findOne).not.toHaveBeenCalled();
+  });
+
   it("enforces the per-email sliding window with a uniform 429", async () => {
-    RL().aggregate.mockResolvedValueOnce([{ n: 5 }]);
+    RL().aggregate.mockResolvedValueOnce([{ n: 6 }]); // over the max of 5
     const res = await post({ email: "A@B.com" });
     expect(res.status).toBe(429);
     await expect(res.json()).resolves.toMatchObject({
@@ -88,7 +97,7 @@ describe("POST /api/auth/otp/send", () => {
   it("enforces the per-IP window too", async () => {
     RL().aggregate
       .mockResolvedValueOnce([{ n: 0 }]) // email count ok
-      .mockResolvedValueOnce([{ n: 20 }]); // IP count maxed
+      .mockResolvedValueOnce([{ n: 21 }]); // IP count over the max of 20
     const res = await post({ email: "a@b.com" });
     expect(res.status).toBe(429);
   });
@@ -221,7 +230,7 @@ describe("POST /api/auth/otp/verify", () => {
   });
 
   it("locks out after repeated failures (uniform 429)", async () => {
-    RL().aggregate.mockResolvedValueOnce([{ n: 5 }]);
+    RL().aggregate.mockResolvedValueOnce([{ n: 6 }]); // over the max of 5
     const { res } = await verifyWith({ email: "a@b.c", otp: "000000" });
     expect(res.status).toBe(429);
     await expect(res.json()).resolves.toMatchObject({
@@ -232,7 +241,7 @@ describe("POST /api/auth/otp/verify", () => {
   it("locks out by IP after repeated failures from that IP (uniform 429)", async () => {
     RL().aggregate
       .mockResolvedValueOnce([]) // email hits: 0
-      .mockResolvedValueOnce([{ n: 25 }]); // ip hits: 25
+      .mockResolvedValueOnce([{ n: 26 }]); // ip hits: over the max of 25
     const { res } = await verifyWith({ email: "target@b.c", otp: "000000" });
     expect(res.status).toBe(429);
     await expect(res.json()).resolves.toMatchObject({
@@ -284,8 +293,8 @@ describe("POST /api/auth/otp/verify", () => {
     expect(pushed).not.toContain(".");
     expect(pushed).toBe((await import("@/lib/auth")).hashToken(jar.refreshToken));
 
-    // lockout history wiped on success
-    expect(RL().deleteOne).toHaveBeenCalled();
+    // lockout history wiped on success (BOTH email and IP buckets)
+    expect(RL().deleteOne).toHaveBeenCalledTimes(2);
     // both session cookies issued
     expect(jar.accessToken).toBeTruthy();
     expect(jar.refreshToken).toBeTruthy();
@@ -360,8 +369,9 @@ describe("POST /api/auth/refresh (rotation + grace + reuse detection)", () => {
     expect(store.delete).toHaveBeenCalledWith("refreshToken");
   });
 
-  it("ACTIVE token rotates: old marked rotated, new HASHED token stored + cooked", async () => {
+  it("ACTIVE token rotates: old marked rotated (conditional), new HASHED token stored + cooked", async () => {
     const raw = realAuth.generateRefreshToken("uid1");
+    U().updateOne.mockResolvedValue({ modifiedCount: 1 });
     const { res, jar } = await refreshAs({
       raw,
       userDoc: makeSessionUser(realAuth.hashToken(raw)),
@@ -369,12 +379,19 @@ describe("POST /api/auth/refresh (rotation + grace + reuse detection)", () => {
 
     expect(res.status).toBe(200);
 
-    // 1) old entry flagged with rotatedAt (elemMatch targets exactly it)
+    // 1) old entry flagged with rotatedAt via a conditional arrayFilter
+    // (rotatedAt must still be null — concurrent refreshes can't both win)
     const markCall = U().updateOne.mock.calls.find(
-      ([, u]) => u.$set && "refreshTokens.$.rotatedAt" in u.$set
+      ([, u, opts]) =>
+        u.$set &&
+        "refreshTokens.$[el].rotatedAt" in u.$set &&
+        Array.isArray(opts?.arrayFilters)
     );
     expect(markCall).toBeDefined();
-    expect(markCall[0].refreshTokens.$elemMatch.token).toBe(
+    expect(markCall[2].arrayFilters[0]).toMatchObject({
+      "el.rotatedAt": null,
+    });
+    expect(markCall[2].arrayFilters[0]["el.token"].$in).toContain(
       realAuth.hashToken(raw)
     );
 
@@ -408,6 +425,34 @@ describe("POST /api/auth/refresh (rotation + grace + reuse detection)", () => {
       )
     ).toBe(false);
     // access token still refreshed so the waiting tab can proceed
+    expect(jar.accessToken).toBeTruthy();
+  });
+
+  it("race loser (already rotated by a concurrent refresh) → grace path, no duplicate session", async () => {
+    const raw = realAuth.generateRefreshToken("uid1");
+    const hash = realAuth.hashToken(raw);
+    // First read: token looks ACTIVE; the conditional mark then loses the
+    // race (modifiedCount 0); re-read shows it rotated 30s ago (in grace).
+    U().findOne
+      .mockResolvedValueOnce(makeSessionUser(hash))
+      .mockResolvedValueOnce(makeSessionUser(hash, new Date(Date.now() - 30_000)));
+    U().updateOne.mockResolvedValue({ modifiedCount: 0 });
+    const { jar, store } = installJar({ refreshToken: raw });
+
+    const { POST } = await loadRefresh();
+    const res = await POST(
+      new Request("http://localhost/api/auth/refresh", { method: "POST" })
+    );
+
+    expect(res.status).toBe(200);
+    // No replacement session minted and no new refresh cookie…
+    expect(U().updateOne.mock.calls.some(([, u]) => u.$push)).toBe(false);
+    expect(store.set).not.toHaveBeenCalledWith(
+      "refreshToken",
+      expect.anything(),
+      expect.anything()
+    );
+    // …but the waiting tab still gets a fresh access token.
     expect(jar.accessToken).toBeTruthy();
   });
 
@@ -466,13 +511,17 @@ describe("POST /api/auth/logout", () => {
     expect(store.delete).toHaveBeenCalledWith("refreshToken");
   });
 
-  it("still clears cookies when the DB explodes (logout must never trap)", async () => {
-    installJar({ refreshToken: "x.y.z" });
+  it("is HONEST on DB failure (500) but still clears THIS device's cookies", async () => {
+    const realAuth = await realAuthPromise;
+    const raw = realAuth.generateRefreshToken("uid1");
+    const { store } = installJar({ refreshToken: raw, accessToken: "acc" });
     U().updateOne.mockRejectedValueOnce(new Error("db down"));
 
     const { POST } = await loadLogout();
     const res = await POST(new Request("http://localhost/api/auth/logout", { method: "POST" }));
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(500);
+    expect(store.delete).toHaveBeenCalledWith("accessToken");
+    expect(store.delete).toHaveBeenCalledWith("refreshToken");
   });
 
   it("works with no cookie at all", async () => {

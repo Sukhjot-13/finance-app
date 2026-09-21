@@ -20,6 +20,19 @@ if (!ACCESS_TOKEN_SECRET || !REFRESH_TOKEN_SECRET) {
   throw new Error("Missing JWT secret environment variables.");
 }
 
+// Fail-fast is not enough: weak or reused secrets silently collapse
+// security. Warn loudly in every environment so misconfiguration is seen.
+if (ACCESS_TOKEN_SECRET.length < 32 || REFRESH_TOKEN_SECRET.length < 32) {
+  console.warn(
+    "auth: JWT secret shorter than 32 chars — generate with `openssl rand -base64 32`."
+  );
+}
+if (ACCESS_TOKEN_SECRET === REFRESH_TOKEN_SECRET) {
+  console.warn(
+    "auth: ACCESS_TOKEN_SECRET and REFRESH_TOKEN_SECRET are identical — token-domain separation is lost. Use distinct secrets."
+  );
+}
+
 const accessTokenSecret = new TextEncoder().encode(ACCESS_TOKEN_SECRET);
 
 /**
@@ -106,6 +119,12 @@ export const verifySession = async () => {
     await dbConnect();
 
     const hashedRefresh = hashToken(refreshToken);
+    // NOTE: rotated entries are deliberately still accepted here. The
+    // presented ACCESS token (15-minute expiry) bounds the exposure window,
+    // and rejecting past-grace rotated tokens at this layer would turn
+    // legitimate idle tabs into false "theft" detections (the refresh
+    // endpoint revokes ALL sessions on past-grace reuse). Rotation hygiene
+    // is enforced by the refresh endpoint + purgeExpiredRefreshTokens.
     const userFromDb = await User.findOne({
       _id: decoded.userId,
       // Match the hash; legacy plaintext entries still work until they
@@ -138,7 +157,12 @@ export const verifySession = async () => {
  * pull:
  *  - tokens older than the full TTL, and
  *  - rotated-away tokens past the short rotation-grace window.
+ *
+ * Additionally caps stored sessions at MAX_SESSIONS_PER_USER (oldest first):
+ * without a cap, long-lived users accumulate sessions forever and lost or
+ * stolen devices never age out.
  */
+export const MAX_SESSIONS_PER_USER = 20;
 export const purgeExpiredRefreshTokens = async (userId) => {
   const User = (await import("@/models/user.model")).default;
   const ttlCutoff = new Date(Date.now() - REFRESH_TOKEN_TTL_MS);
@@ -156,4 +180,21 @@ export const purgeExpiredRefreshTokens = async (userId) => {
       },
     }
   );
+  // Session cap: drop the oldest sessions beyond the cap. Read-then-pull is
+  // racy under concurrent logins, but the worst case is one extra session
+  // until the next purge — never a security hole, only mild bloat.
+  const user = await User.findOne({ _id: userId }, { refreshTokens: 1 });
+  const tokens = user?.refreshTokens;
+  if (Array.isArray(tokens) && tokens.length > MAX_SESSIONS_PER_USER) {
+    const excess = [...tokens]
+      .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt))
+      .slice(0, tokens.length - MAX_SESSIONS_PER_USER)
+      .map((t) => t.token);
+    if (excess.length > 0) {
+      await User.updateOne(
+        { _id: userId },
+        { $pull: { refreshTokens: { token: { $in: excess } } } }
+      );
+    }
+  }
 };

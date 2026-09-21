@@ -60,18 +60,56 @@ export async function PUT(request, { params }) {
     await dbConnect();
     const { type, amount, category, date, description, excludeFromBudget } = body;
 
+    // Strict guards: present-but-invalid fields are 400s. The old code
+    // silently OMITTED them and returned 200, so edits looked saved while
+    // changing nothing — pure confusion.
+    if (type !== undefined && !["income", "expense"].includes(type)) {
+      return sendError("Transaction type must be 'income' or 'expense'", 400);
+    }
+
+    let amountNum;
+    if (amount !== undefined) {
+      amountNum =
+        typeof amount === "string" && amount.trim() === ""
+          ? NaN
+          : Number(amount);
+      if (!Number.isFinite(amountNum) || amountNum <= 0) {
+        return sendError("Amount must be a positive number", 400);
+      }
+    }
+
+    let categoryStr;
+    if (category !== undefined) {
+      if (typeof category !== "string" || !category.trim()) {
+        return sendError("Category is required", 400);
+      }
+      if (category.trim().length > 50) {
+        return sendError("Category name cannot exceed 50 characters", 400);
+      }
+      categoryStr = category.trim();
+    }
+
+    let parsedDate;
+    if (date !== undefined && date !== null) {
+      parsedDate = new Date(date);
+      if (isNaN(parsedDate.getTime())) {
+        return sendError("Valid date is required", 400);
+      }
+    }
+
+    if (description !== undefined && typeof description !== "string") {
+      return sendError("Description must be a string", 400);
+    }
+
     // Store the date exactly as the client sent it (see POST /api/transactions
     // for why no timezone-offset adjustment belongs on the server).
-    let parsedDate = date ? new Date(date) : undefined;
-    if (parsedDate && isNaN(parsedDate.getTime())) parsedDate = undefined;
-
     const updatedTransaction = await Transaction.findOneAndUpdate(
       { _id: id, userId: user._id },
       {
-        ...(type && { type }),
-        ...(amount && { amount: parseFloat(amount) }),
-        ...(category && { category: category.trim() }),
-        ...(parsedDate && { date: parsedDate }),
+        ...(type !== undefined && { type }),
+        ...(amountNum !== undefined && { amount: amountNum }),
+        ...(categoryStr !== undefined && { category: categoryStr }),
+        ...(parsedDate !== undefined && { date: parsedDate }),
         ...(description !== undefined && { description: description.trim() }),
         // Check against undefined (not truthiness) so `false` persists —
         // `...(excludeFromBudget && {...})` would silently drop a cleared flag.

@@ -11,8 +11,8 @@ const inter = Inter({ subsets: ["latin"] });
 export const viewport = {
   width: "device-width",
   initialScale: 1,
-  maximumScale: 1,
-  userScalable: false,
+  // No maximumScale / userScalable:false — disabling pinch-zoom is a mobile
+  // accessibility failure (WCAG 1.4.4). Keep viewportFit + themeColor.
   viewportFit: "cover",
   themeColor: "#09090b",
 };

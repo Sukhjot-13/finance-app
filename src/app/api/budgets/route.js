@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import dbConnect from "@/lib/mongodb";
 import Budget from "@/models/budget.model";
 import { verifySession } from "@/lib/auth";
+import { isValidMonthKey, utcMonthKey } from "@/lib/utils";
 
 // GET all budgets for the current month
 export async function GET(req) {
@@ -13,7 +14,9 @@ export async function GET(req) {
     await dbConnect();
 
     const { searchParams } = new URL(req.url);
-    const month = searchParams.get("month") || getCurrentMonth();
+    // Server-LOCAL month parts disagree with users' calendars around month
+    // boundaries — fall back on UTC parts (the server is UTC in production).
+    const month = searchParams.get("month") || utcMonthKey();
 
     const budgets = await Budget.find({ userId: user._id, month }).lean();
     return NextResponse.json(budgets, { status: 200 });
@@ -31,8 +34,16 @@ export async function POST(req) {
 
   try {
     await dbConnect();
-    const body = await req.json();
-    const { category, amount, month } = body;
+    let body;
+    try {
+      body = await req.json();
+    } catch {
+      return NextResponse.json(
+        { message: "Invalid request body" },
+        { status: 400 }
+      );
+    }
+    const { category, amount, month } = body || {};
 
     // Strict type/format guards — don't trust client coercion ("50" < 1
     // string-compares as false, and schema validators only run on the
@@ -49,7 +60,7 @@ export async function POST(req) {
       );
     }
 
-    if (typeof month !== "string" || !/^\d{4}-\d{2}$/.test(month)) {
+    if (!isValidMonthKey(month)) {
       return NextResponse.json(
         { message: "Month must be in YYYY-MM format" },
         { status: 400 }
@@ -82,9 +93,10 @@ export async function POST(req) {
       );
     }
 
+    // Infrastructure failures are 500s (retryable) — never 400s.
     return NextResponse.json(
       { message: "Error saving budget" },
-      { status: 400 }
+      { status: 500 }
     );
   }
 }
@@ -98,8 +110,10 @@ export async function DELETE(req) {
   try {
     await dbConnect();
     const { searchParams } = new URL(req.url);
-    const category = searchParams.get("category");
-    const month = searchParams.get("month") || getCurrentMonth();
+    const rawCategory = searchParams.get("category");
+    const rawMonth = searchParams.get("month");
+    const category = rawCategory?.trim();
+    const month = rawMonth || utcMonthKey();
 
     if (!category) {
       return NextResponse.json(
@@ -108,11 +122,28 @@ export async function DELETE(req) {
       );
     }
 
-    await Budget.findOneAndDelete({
+    if (!isValidMonthKey(month)) {
+      return NextResponse.json(
+        { message: "Month must be in YYYY-MM format" },
+        { status: 400 }
+      );
+    }
+
+    // POST trims before storing, so match trimmed here — otherwise
+    // "?category=%20Food%20" deletes nothing yet reports success.
+    // A miss is a 404, not a silent success.
+    const deleted = await Budget.findOneAndDelete({
       userId: user._id,
       category,
       month,
     });
+
+    if (!deleted) {
+      return NextResponse.json(
+        { message: "Budget not found" },
+        { status: 404 }
+      );
+    }
 
     return NextResponse.json(
       { message: "Budget deleted successfully" },
@@ -125,9 +156,4 @@ export async function DELETE(req) {
       { status: 500 }
     );
   }
-}
-
-function getCurrentMonth() {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
 }

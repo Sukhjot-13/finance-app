@@ -57,3 +57,21 @@ export const formatDateForInput = (date) => {
   const day = date.getDate().toString().padStart(2, '0');
   return `${year}-${month}-${day}`;
 };
+
+/**
+ * Strict YYYY-MM month keys. The naive /^\d{4}-\d{2}$/ also accepts
+ * impossible months like "2026-13", which then store budgets that no
+ * month-scoped query ever displays. Shared by budget routes + model.
+ */
+export const MONTH_KEY_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
+
+export const isValidMonthKey = (value) =>
+  typeof value === 'string' && MONTH_KEY_RE.test(value);
+
+/**
+ * Deterministic UTC month key for server-side fallbacks. Server-LOCAL
+ * getters disagree with users' calendars around month boundaries (server
+ * UTC vs user UTC-5…+14), so fallbacks must always use UTC parts.
+ */
+export const utcMonthKey = (date = new Date()) =>
+  `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`;

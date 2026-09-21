@@ -57,8 +57,7 @@ describe("GET /api/reports/dashboard", () => {
     expect(recentBuilder.limit).toHaveBeenCalledWith(5);
   });
 
-  it("falls back to a server-computed month window without params", async () => {
-    T().aggregate.mockResolvedValue([]);
+  it("falls back to a server-computed month window without params", async () => {    T().aggregate.mockResolvedValue([]);
     const res = await get("");
     expect(res.status).toBe(200);
 
@@ -72,8 +71,16 @@ describe("GET /api/reports/dashboard", () => {
     }
   });
 
-  it("zero-fills empty aggregations instead of NaN-ing the UI", async () => {
-    T().aggregate.mockResolvedValue([]);
+  it("400s present-but-unparseable start/end bounds", async () => {
+    const res = await get("?start=nonsense");
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({
+      message: /Invalid date range/,
+    });
+    expect(T().aggregate).not.toHaveBeenCalled();
+  });
+
+  it("zero-fills empty aggregations instead of NaN-ing the UI", async () => {    T().aggregate.mockResolvedValue([]);
     const body = await (await get("")).json();
     expect(body.currentBalance).toBe(0);
     expect(body.monthlyIncome).toBe(0);
@@ -131,13 +138,33 @@ describe("GET /api/reports/budget-progress", () => {
     expect(spendMatch.date.$lt).toEqual(new Date("2026-08-31T00:00Z"));
   });
 
-  it("falls back to the current month key on invalid month params", async () => {
+  it("400s invalid month params instead of silently mixing months", async () => {
     B().find.mockReturnValueOnce(makeQueryBuilder([]));
     T().aggregate.mockResolvedValue([]);
 
-    await get("month=garbage");
+    for (const qs of ["month=garbage", "month=2026-13", "month=2026-1"]) {
+      const res = await get(qs);
+      expect(res.status).toBe(400);
+      await expect(res.json()).resolves.toMatchObject({
+        message: /YYYY-MM format/,
+      });
+    }
+    expect(B().find).not.toHaveBeenCalled();
+  });
 
-    expect(B().find.mock.calls[0][0].month).toMatch(/^\d{4}-\d{2}$/);
+  it("derives the budget month from the window start when month is absent", async () => {
+    B().find.mockReturnValueOnce(makeQueryBuilder([]));
+    T().aggregate.mockResolvedValue([]);
+
+    await get("start=2026-07-31T00:00Z&end=2026-08-31T00:00Z");
+
+    expect(B().find.mock.calls[0][0].month).toBe("2026-07");
+  });
+
+  it("400s present-but-unparseable start/end bounds", async () => {
+    const res = await get("start=nonsense&month=2026-08");
+    expect(res.status).toBe(400);
+    expect(T().aggregate).not.toHaveBeenCalled();
   });
 
   it("returns null overall when only no overall budget exists", async () => {
@@ -165,6 +192,29 @@ describe("POST /api/reports/generate", () => {
   it("400s on missing or reversed ranges", async () => {
     expect((await post({})).status).toBe(400);
     expect((await post({ startDate: "2026-08-10", endDate: "2026-08-01" })).status).toBe(400);
+  });
+
+  it("400s invalid instants and ranges over 3 years", async () => {
+    expect(
+      (
+        await post({
+          startDate: "2026-08-01",
+          endDate: "2026-08-31",
+          startInstant: "not-a-date",
+        })
+      ).status
+    ).toBe(400);
+    expect(
+      (
+        await post({
+          startDate: "2020-01-01",
+          endDate: "2026-08-31",
+          startInstant: "2020-01-01T00:00:00.000Z",
+          endInstant: "2026-08-31T23:59:59.999Z",
+        })
+      ).status
+    ).toBe(400);
+    expect(T().find).not.toHaveBeenCalled();
   });
 
   it("prefers browser-timezone instants and sums/sorts breakdowns", async () => {

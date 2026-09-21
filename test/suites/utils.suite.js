@@ -4,6 +4,8 @@ import {
   formatCurrency,
   formatDate,
   formatDateForInput,
+  isValidMonthKey,
+  utcMonthKey,
 } from "@/lib/utils";
 
 describe("formatCurrency", () => {
@@ -56,5 +58,25 @@ describe("formatDateForInput", () => {
     expect(formatDateForInput(null)).toBe("");
     expect(formatDateForInput(undefined)).toBe("");
     expect(formatDateForInput("2026-01-01")).toBe("");
+  });
+});
+
+describe("isValidMonthKey / utcMonthKey", () => {
+  it("accepts real calendar months only", () => {
+    expect(isValidMonthKey("2026-08")).toBe(true);
+    expect(isValidMonthKey("2026-01")).toBe(true);
+    expect(isValidMonthKey("2026-12")).toBe(true);
+    expect(isValidMonthKey("2026-13")).toBe(false);
+    expect(isValidMonthKey("2026-00")).toBe(false);
+    expect(isValidMonthKey("2026-1")).toBe(false);
+    expect(isValidMonthKey("08-2026")).toBe(false);
+    expect(isValidMonthKey("")).toBe(false);
+    expect(isValidMonthKey(null)).toBe(false);
+    expect(isValidMonthKey(undefined)).toBe(false);
+  });
+
+  it("derives a UTC month key deterministically", () => {
+    expect(utcMonthKey(new Date("2026-08-15T12:00:00Z"))).toBe("2026-08");
+    expect(utcMonthKey(new Date("2026-01-01T00:30:00Z"))).toBe("2026-01");
   });
 });

@@ -8,9 +8,14 @@ import { UserContext } from "@/app/(main)/layout";
 
 export default function ProfilePage() {
   const { user: contextUser, setUser } = useContext(UserContext);
-  const [accountName, setAccountName] = useState("");
-  const [currency, setCurrency] = useState("USD");
+  // Initialize from context (never blank defaults): if the server fetch
+  // fails, the form keeps showing the last-known values instead of ""/USD
+  // that a Save would then persist over the real profile.
+  const [accountName, setAccountName] = useState(contextUser?.accountName || "");
+  const [currency, setCurrency] = useState(contextUser?.currency || "USD");
   const [loading, setLoading] = useState(true);
+  const [ready, setReady] = useState(false);
+  const [loadError, setLoadError] = useState("");
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState(null);
   const [confirmLogoutAll, setConfirmLogoutAll] = useState(false);
@@ -27,10 +32,16 @@ export default function ProfilePage() {
         setUser(data);
         setAccountName(data.accountName || "");
         setCurrency(data.currency || "USD");
+        setReady(true);
+        setLoadError("");
         setLoading(false);
       })
       .catch(() => {
-        if (!cancelled) setLoading(false);
+        if (cancelled) return;
+        // Keep context values in the form; Save stays disabled until a
+        // successful load (ready) so stale/blank values can't overwrite.
+        setLoadError("Couldn't load your profile. Check your connection and retry — saving is disabled until it loads.");
+        setLoading(false);
       });
     return () => {
       cancelled = true;
@@ -39,13 +50,19 @@ export default function ProfilePage() {
 
   const handleSave = async (e) => {
     e.preventDefault();
+    if (!ready) return;
+    const trimmed = accountName.trim();
+    if (!trimmed) {
+      setStatus({ type: "error", text: "Account name cannot be blank." });
+      return;
+    }
     setSaving(true);
     setStatus(null);
     try {
       const res = await api("/api/user", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ accountName, currency }),
+        body: JSON.stringify({ accountName: trimmed, currency }),
       });
       if (!res.ok) {
         let message = "Failed to save profile";
@@ -56,7 +73,8 @@ export default function ProfilePage() {
         }
         throw new Error(message);
       }
-      setUser((prev) => ({ ...prev, accountName, currency }));
+      setUser((prev) => ({ ...prev, accountName: trimmed, currency }));
+      setAccountName(trimmed);
       setStatus({ type: "success", text: "Profile saved successfully." });
     } catch (error) {
       console.error(error);
@@ -98,6 +116,18 @@ export default function ProfilePage() {
 
   return (
     <div className="max-w-4xl mx-auto space-y-8">
+      {/* Load failure: saving stays disabled until the server values arrive */}
+      {loadError && (
+        <div className="p-4 rounded-2xl border text-xs font-semibold flex items-center justify-between shadow-lg bg-amber-500/10 border-amber-500/30 text-amber-300">
+          <span>{loadError}</span>
+          <button
+            onClick={() => window.location.reload()}
+            className="underline text-xs text-amber-400 hover:text-amber-200"
+          >
+            Reload
+          </button>
+        </div>
+      )}
       {/* Inline status banner */}
       {status && (
         <div
@@ -204,13 +234,19 @@ export default function ProfilePage() {
             >
               <option value="USD" className="bg-zinc-900 text-zinc-100">USD ($) - United States Dollar</option>
               <option value="INR" className="bg-zinc-900 text-zinc-100">INR (₹) - Indian Rupee</option>
+              {/* Stored currency outside the supported list: show it rather
+                  than rendering a blank/broken selection. */}
+              {currency !== "USD" && currency !== "INR" && (
+                <option value={currency} className="bg-zinc-900 text-zinc-100">{currency} (unsupported — pick USD or INR)</option>
+              )}
             </select>
           </div>
 
           <div className="flex justify-end pt-2">
             <button
               type="submit"
-              disabled={saving}
+              disabled={saving || !ready}
+              title={!ready ? "Waiting for your profile to load" : undefined}
               className="flex items-center gap-2 bg-gradient-to-r from-emerald-400 to-teal-500 text-zinc-950 font-bold py-2.5 px-6 rounded-xl shadow-lg shadow-emerald-500/20 hover:from-emerald-300 hover:to-teal-400 transition-all disabled:opacity-50 active:scale-[0.98] text-xs"
             >
               <Save size={15} />

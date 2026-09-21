@@ -4,6 +4,7 @@ import Budget from "@/models/budget.model";
 import { verifySession } from "@/lib/auth";
 import mongoose from "mongoose";
 import { NextResponse } from "next/server";
+import { isValidMonthKey, utcMonthKey } from "@/lib/utils";
 
 const OVERALL_CATEGORY = "__total__";
 
@@ -26,16 +27,43 @@ export async function GET(req) {
       const parsed = new Date(value);
       return isNaN(parsed.getTime()) ? null : parsed;
     };
+    const startRaw = searchParams.get("start");
+    const endRaw = searchParams.get("end");
+    const startParam = startRaw ? parseInstant(startRaw) : null;
+    const endParam = endRaw ? parseInstant(endRaw) : null;
+    // Present-but-unparseable bounds are a client bug: 400 instead of
+    // silently mixing an unintended spending window with the budgets.
+    if ((startRaw && !startParam) || (endRaw && !endParam)) {
+      return NextResponse.json(
+        { message: "Invalid date range. Use ISO date strings." },
+        { status: 400 }
+      );
+    }
     const today = new Date();
     const startOfMonth =
-      parseInstant(searchParams.get("start")) ||
+      startParam ||
       new Date(today.getFullYear(), today.getMonth(), 1);
     const endOfMonth =
-      parseInstant(searchParams.get("end")) ||
+      endParam ||
       new Date(startOfMonth.getFullYear(), startOfMonth.getMonth() + 1, 1);
-    const monthKey = /^\d{4}-\d{2}$/.test(searchParams.get("month") || "")
-      ? searchParams.get("month")
-      : `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
+    // Budgets must come from the SAME month as the spending window. An
+    // explicit month wins (strictly validated); otherwise derive it from the
+    // window start so the two can never silently disagree; otherwise UTC now.
+    const monthParam = searchParams.get("month") || "";
+    let monthKey;
+    if (monthParam) {
+      if (!isValidMonthKey(monthParam)) {
+        return NextResponse.json(
+          { message: "Month must be in YYYY-MM format" },
+          { status: 400 }
+        );
+      }
+      monthKey = monthParam;
+    } else if (startRaw) {
+      monthKey = utcMonthKey(startParam);
+    } else {
+      monthKey = utcMonthKey(today);
+    }
 
     // Get all budgets for this month
     const budgets = await Budget.find({ userId: user._id, month: monthKey }).lean();

@@ -90,32 +90,77 @@ export async function POST() {
     }
 
     if (!isRotatedToken) {
-      // 3. Active token — rotate it: mark this entry rotated and store the
-      // new one (hashed). Two ops because Mongo forbids pull+push on the
-      // same array in one update; both target exactly this entry.
+      // 3. Active token — rotate it: conditionally mark this entry rotated
+      // AND store the new one (hashed). The mark carries an arrayFilter
+      // requiring `rotatedAt: null`, so concurrent double-refreshes cannot
+      // both win: exactly one marks the entry (modifiedCount 1) and mints a
+      // replacement; the loser re-reads and falls into the grace path below
+      // instead of proliferating sessions.
       const newRefreshToken = generateRefreshToken(user._id);
-      await User.updateOne(
-        {
-          _id: decoded.userId,
-          refreshTokens: { $elemMatch: { token: sessionEntry.token } },
-        },
-        { $set: { "refreshTokens.$.rotatedAt": new Date() } }
-      );
-      await User.updateOne(
+      const now = new Date();
+      const mark = await User.updateOne(
         { _id: decoded.userId },
-        { $push: { refreshTokens: { token: hashToken(newRefreshToken) } } }
+        { $set: { "refreshTokens.$[el].rotatedAt": now } },
+        {
+          arrayFilters: [
+            {
+              "el.token": { $in: [hashedRaw, rawToken] },
+              "el.rotatedAt": null,
+            },
+          ],
+        }
       );
 
-      // sameSite "lax" — strict broke top-level arrivals from external
-      // links (cookies withheld → proxy treated the user as anonymous).
-      // Lax keeps cross-site POSTs cookieless, so CSRF safety is unchanged.
-      cookieStore.set("refreshToken", newRefreshToken, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        maxAge: 30 * 24 * 60 * 60, // 30 days
-        path: "/",
-        sameSite: "lax",
-      });
+      if ((mark?.modifiedCount ?? 1) === 0) {
+        // Lost the race — another request rotated this entry first (or it
+        // vanished). Re-read to decide: gone → revoked; rotated long ago →
+        // theft; rotated just now → grace (mint access only, no new push).
+        const fresh = await User.findOne({ _id: decoded.userId });
+        const freshEntry = fresh?.refreshTokens?.find(
+          (t) => t.token === hashedRaw || t.token === rawToken
+        );
+        if (!freshEntry) {
+          cookieStore.delete("refreshToken");
+          cookieStore.delete("accessToken");
+          return sendError("Invalid refresh token. Please log in again.", 401);
+        }
+        const freshRotatedAt = freshEntry.rotatedAt
+          ? new Date(freshEntry.rotatedAt).getTime()
+          : null;
+        if (
+          freshRotatedAt !== null &&
+          Date.now() - freshRotatedAt >= REFRESH_ROTATION_GRACE_MS
+        ) {
+          console.warn(
+            "Refresh-token reuse detected — revoking all sessions for user",
+            String(decoded.userId)
+          );
+          await User.updateOne(
+            { _id: decoded.userId },
+            { $set: { refreshTokens: [] } }
+          );
+          cookieStore.delete("refreshToken");
+          cookieStore.delete("accessToken");
+          return sendError("Session expired or invalid. Please log in again.", 401);
+        }
+        // Within grace: fall through to mint only an access token.
+      } else {
+        await User.updateOne(
+          { _id: decoded.userId },
+          { $push: { refreshTokens: { token: hashToken(newRefreshToken) } } }
+        );
+
+        // sameSite "lax" — strict broke top-level arrivals from external
+        // links (cookies withheld → proxy treated the user as anonymous).
+        // Lax keeps cross-site POSTs cookieless, so CSRF safety is unchanged.
+        cookieStore.set("refreshToken", newRefreshToken, {
+          httpOnly: true,
+          secure: process.env.NODE_ENV === "production",
+          maxAge: 30 * 24 * 60 * 60, // 30 days
+          path: "/",
+          sameSite: "lax",
+        });
+      }
     }
     // Rotated-but-within-grace: fall through and just mint an access token.
 

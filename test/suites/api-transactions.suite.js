@@ -93,11 +93,12 @@ describe("GET /api/transactions", () => {
     expect(q.$lte).toEqual(new Date("2026-08-31T23:59:59Z"));
   });
 
-  it("ignores garbage date filters instead of crashing", async () => {
+  it("400s present-but-unparseable date filters instead of silently unfiltering", async () => {
     T().countDocuments.mockResolvedValueOnce(0);
     const res = await get("?from=nonsense&to=alsononsense");
-    expect(res.status).toBe(200);
-    expect(T().find.mock.calls.at(-1)[0].date).toBeUndefined();
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({ message: /Invalid date filter/ });
+    expect(T().find).not.toHaveBeenCalled();
   });
 
   it("surfaces verifySession status verbatim (503 stays retryable)", async () => {
@@ -161,6 +162,28 @@ describe("POST /api/transactions", () => {
     expect(T().instanceSave.mock.contexts.at(-1).excludeFromBudget).toBe(false);
   });
 
+  it("400s malformed JSON and non-string descriptions", async () => {
+    const { POST } = await loadRoute();
+    const badJson = await POST(
+      new Request("http://localhost/api/transactions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{not json",
+      })
+    );
+    expect(badJson.status).toBe(400);
+
+    const res = await post({
+      type: "expense",
+      amount: 5,
+      category: "Food",
+      date: new Date().toISOString(),
+      description: 123,
+    });
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({ message: /Description must be a string/ });
+  });
+
   it("maps mongoose ValidationErrors to 400", async () => {
     T().instanceSave.mockRejectedValueOnce(
       Object.assign(new Error("Validation failed"), { name: "ValidationError" })
@@ -212,21 +235,43 @@ describe("/api/transactions/[id]", () => {
         expect(update).not.toHaveProperty("userId");
       });
 
-      it("drops fields that are absent/invalid instead of clobbering", async () => {
+      it("omits fields that are absent (empty-string description clears)", async () => {
         T().findOneAndUpdate.mockResolvedValueOnce({});
         const { PUT } = await loadIdRoute();
 
-        await PUT(
+        const res = await PUT(
           req("http://localhost/api/t/" + VALID, "PUT", {
             description: "", // empty string IS a meaningful clear → set
-            date: "garbage", // invalid → omitted
           }),
           { params: Promise.resolve({ id: VALID }) }
         );
 
+        expect(res.status).toBe(200);
         const update = T().findOneAndUpdate.mock.calls[0][1];
         expect(update.description).toBe("");
         expect(update).not.toHaveProperty("date");
+        expect(update).not.toHaveProperty("amount");
+      });
+
+      it.each([
+        [{ date: "garbage" }, "Valid date is required"],
+        [{ amount: 0 }, "Amount must be a positive number"],
+        [{ amount: -5 }, "Amount must be a positive number"],
+        [{ amount: "abc" }, "Amount must be a positive number"],
+        [{ type: "bogus" }, "Transaction type must be"],
+        [{ category: "  " }, "Category is required"],
+        [{ category: "x".repeat(51) }, "cannot exceed 50 characters"],
+        [{ description: 42 }, "Description must be a string"],
+      ])("400s present-but-invalid fields instead of silently dropping: %j", async (body, message) => {
+        T().findOneAndUpdate.mockClear();
+        const { PUT } = await loadIdRoute();
+        const res = await PUT(
+          req("http://localhost/api/t/" + VALID, "PUT", body),
+          { params: Promise.resolve({ id: VALID }) }
+        );
+        expect(res.status).toBe(400);
+        await expect(res.json()).resolves.toMatchObject({ error: expect.stringContaining(message) });
+        expect(T().findOneAndUpdate).not.toHaveBeenCalled();
       });
 
       it("scopes by owner and 404s someone else's row", async () => {
@@ -243,13 +288,18 @@ describe("/api/transactions/[id]", () => {
         });
       });
 
-      it("maps ValidationError to HTTP 400", async () => {
+      it("maps DB ValidationError to HTTP 400 (valid payload, failing store)", async () => {
         const valErr = new Error("Amount must be a positive number");
         valErr.name = "ValidationError";
         T().findOneAndUpdate.mockRejectedValueOnce(valErr);
         const { PUT } = await loadIdRoute();
         const res = await PUT(
-          req("http://localhost/api/t/" + VALID, "PUT", { amount: -10 }),
+          req("http://localhost/api/t/" + VALID, "PUT", {
+            type: "expense",
+            amount: 5,
+            category: "Food",
+            date: new Date().toISOString(),
+          }),
           { params: Promise.resolve({ id: VALID }) }
         );
         expect(res.status).toBe(400);

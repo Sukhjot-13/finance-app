@@ -82,12 +82,15 @@ function DashboardSkeleton() {
 export default function DashboardPage() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [refreshError, setRefreshError] = useState(false);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [isBudgetOpen, setIsBudgetOpen] = useState(false);
   const [budgetVersion, setBudgetVersion] = useState(0);
   const { user } = useContext(UserContext);
 
   const fetchSeq = useRef(0);
+  const dataRef = useRef(null);
+  const lastOkRef = useRef(0);
 
   const fetchData = useCallback(async () => {
     const seq = ++fetchSeq.current;
@@ -100,10 +103,21 @@ export default function DashboardPage() {
       );
       if (!res.ok) throw new Error("Failed to fetch dashboard data");
       const result = await res.json();
-      if (fetchSeq.current === seq) setData(result);
+      if (fetchSeq.current === seq) {
+        setData(result);
+        dataRef.current = result;
+        lastOkRef.current = Date.now();
+        setRefreshError(false);
+      }
     } catch (error) {
       console.error(error);
-      if (fetchSeq.current === seq) setData(null);
+      if (fetchSeq.current === seq) {
+        // Never wipe good data on a refetch failure — keep the stale
+        // dashboard visible with a retry affordance instead of swapping in
+        // the full error wall. Only a failed FIRST load clears to null.
+        if (!dataRef.current) setData(null);
+        setRefreshError(true);
+      }
     } finally {
       if (fetchSeq.current === seq) setLoading(false);
     }
@@ -111,7 +125,6 @@ export default function DashboardPage() {
 
   const refreshWithSkeleton = () => {
     setLoading(true);
-    setData(null);
     fetchData();
   };
 
@@ -120,7 +133,14 @@ export default function DashboardPage() {
     fetchData();
 
     const onVisibilityChange = () => {
-      if (document.visibilityState === "visible") fetchData();
+      // Throttled: a tab left open across hours must self-correct, but
+      // every focus event refetching hammers the API for no reason.
+      if (
+        document.visibilityState === "visible" &&
+        Date.now() - lastOkRef.current > 30_000
+      ) {
+        fetchData();
+      }
     };
     document.addEventListener("visibilitychange", onVisibilityChange);
     return () =>
@@ -191,6 +211,16 @@ export default function DashboardPage() {
         }}
       />
       <div className="space-y-8 pb-24 sm:pb-12 max-w-7xl mx-auto">
+        {/* Stale-data notice: a background refetch failed, numbers below
+            are the last good snapshot. */}
+        {refreshError && (
+          <div className="p-3.5 bg-amber-500/10 border border-amber-500/30 rounded-xl text-xs font-medium text-amber-300 flex items-center justify-between">
+            <span>Couldn&apos;t refresh — showing last loaded data.</span>
+            <button onClick={() => fetchData()} className="text-xs underline text-amber-400 hover:text-amber-200">
+              Retry
+            </button>
+          </div>
+        )}
         {/* Top 3 Stat Cards */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <StatCard
@@ -231,7 +261,7 @@ export default function DashboardPage() {
                 </h2>
               </div>
               <span className="text-xs font-mono text-zinc-500">
-                {data.recentTransactions.length} recorded
+                {data.recentTransactions.length} recent
               </span>
             </div>
 

@@ -59,13 +59,29 @@ describe("POST /api/budgets (M4 type guards)", () => {
   });
 
   it("rejects non-YYYY-MM months on BOTH insert and update paths", async () => {
-    for (const month of ["2026-1", "08-2026", "abc", ""]) {
+    for (const month of ["2026-1", "08-2026", "abc", "", "2026-13", "2026-00"]) {
       const res = await post({ category: "Food", amount: 10, month });
       expect(res.status).toBe(400);
       await expect(res.json()).resolves.toMatchObject({
         message: /YYYY-MM format/,
       });
     }
+  });
+
+  it("400s malformed JSON and 500s infrastructure failure (never 400)", async () => {
+    const { POST } = await loadRoute();
+    const badJson = await POST(
+      new Request("http://localhost/api/budgets", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{not json",
+      })
+    );
+    expect(badJson.status).toBe(400);
+
+    globalThis.__models.budget.findOneAndUpdate.mockRejectedValueOnce(new Error("db down"));
+    const res = await post({ category: "Food", amount: 5, month: "2026-08" });
+    expect(res.status).toBe(500);
   });
 
   it("rejects amounts that are not finite numbers ≥ 1", async () => {
@@ -128,19 +144,40 @@ describe("DELETE /api/budgets", () => {
     expect(res.status).toBe(400);
   });
 
-  it("deletes scoped to the owner and returns success even when absent", async () => {
+  it("deletes scoped to the owner (trimmed) and 404s when absent", async () => {
     globalThis.__models.budget.findOneAndDelete.mockResolvedValueOnce(null);
     const { DELETE } = await loadRoute();
 
-    const res = await DELETE(
+    const missing = await DELETE(
       req("DELETE", "http://localhost/api/budgets?category=Food&month=2026-08")
     );
 
-    expect(res.status).toBe(200);
+    expect(missing.status).toBe(404);
     expect(globalThis.__models.budget.findOneAndDelete).toHaveBeenCalledWith({
       userId: "64b64b64b64b64b64b64b64b",
       category: "Food",
       month: "2026-08",
     });
+
+    // untrimmed input matches the trimmed stored value
+    globalThis.__models.budget.findOneAndDelete.mockResolvedValueOnce({ _id: "b1" });
+    const res = await DELETE(
+      req("DELETE", "http://localhost/api/budgets?category=%20Food%20&month=2026-08")
+    );
+    expect(res.status).toBe(200);
+    expect(globalThis.__models.budget.findOneAndDelete).toHaveBeenLastCalledWith({
+      userId: "64b64b64b64b64b64b64b64b",
+      category: "Food",
+      month: "2026-08",
+    });
+  });
+
+  it("400s invalid months on DELETE", async () => {
+    const { DELETE } = await loadRoute();
+    const res = await DELETE(
+      req("DELETE", "http://localhost/api/budgets?category=Food&month=2026-13")
+    );
+    expect(res.status).toBe(400);
+    expect(globalThis.__models.budget.findOneAndDelete).not.toHaveBeenCalled();
   });
 });

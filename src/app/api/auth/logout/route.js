@@ -31,13 +31,21 @@ export async function POST(req) {
       }
     }
   } catch (error) {
-    // Even if there's an error, we should proceed to clear cookies
+    // Honest failure: the server-side session may still be live, so report
+    // a 500 — but still clear this device's cookies so the local logout
+    // always takes effect here (mirrors logout-all's contract).
     console.error("Logout error:", error.message);
-  } finally {
-    // Clear the cookies on the client side regardless
     cookieStore.delete("accessToken");
     cookieStore.delete("refreshToken");
+    return sendError(
+      "Could not complete server-side logout. This device was logged out locally — please log in and use 'Log Out From All Devices' if this is a shared device.",
+      500
+    );
   }
+
+  // Clear the cookies on the client side regardless
+  cookieStore.delete("accessToken");
+  cookieStore.delete("refreshToken");
 
   return sendSuccess({ message: "Logged out successfully" });
 }

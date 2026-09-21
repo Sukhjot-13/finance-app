@@ -362,14 +362,16 @@ export default function MainLayout({ children }) {
     return () => window.removeEventListener("resize", onResize);
   }, [router]);
 
-  // Close the mobile drawer when the route changes.
-  const [prevPathname, setPrevPathname] = useState(pathname);
-  if (prevPathname !== pathname) {
-    setPrevPathname(pathname);
-    if (isMobileOpen) {
+  // Close the mobile drawer when the route changes (effect, not during
+  // render — setState-in-render causes an extra render pass every
+  // navigation).
+  const prevPathnameRef = useRef(pathname);
+  useEffect(() => {
+    if (prevPathnameRef.current !== pathname) {
+      prevPathnameRef.current = pathname;
       setIsMobileOpen(false);
     }
-  }
+  }, [pathname]);
 
   const getPageTitle = () => {
     if (pathname.includes("/dashboard")) return "Dashboard";
@@ -442,6 +444,15 @@ export default function MainLayout({ children }) {
           >
             Try again
           </button>
+          {/* Escape hatch: if reload keeps failing (e.g. revoked session the
+              refresh layer couldn't classify), the user can always re-login
+              instead of looping on retry forever. */}
+          <button
+            onClick={() => router.replace("/login")}
+            className="w-full mt-2.5 py-2.5 px-4 bg-zinc-900 hover:bg-zinc-800 text-zinc-300 rounded-xl text-sm font-semibold transition-colors border border-zinc-800"
+          >
+            Go to login
+          </button>
         </div>
       </div>
     );
@@ -475,12 +486,12 @@ export default function MainLayout({ children }) {
         <MobileDrawer isOpen={isMobileOpen} onClose={() => setIsMobileOpen(false)} />
         
         <main className="flex-1 flex flex-col h-full overflow-hidden relative z-10">
-          <header 
-            onTouchMove={(e) => {
-              if (typeof window !== "undefined" && window.innerWidth < 1024) {
-                e.preventDefault();
-              }
-            }}
+          {/* NOTE: no onTouchMove preventDefault here. A blanket preventDefault
+              on the header blocks scroll gestures starting on it (and React
+              attaches touch listeners passively, so it only logs warnings).
+              Overscroll/bounce containment is handled by the layout's
+              overscroll + overflow classes instead. */}
+          <header
             className="shrink-0 bg-zinc-950/90 backdrop-blur-xl border-b border-zinc-800/80 px-4 sm:px-8 py-3.5 pt-[calc(0.875rem+env(safe-area-inset-top,0px))] lg:pt-3.5 z-20"
           >
             <div className="flex justify-between items-center">

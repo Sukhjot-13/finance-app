@@ -82,6 +82,20 @@ describe("POST /api/categories", () => {
     expect(ctx.userId).toBe("64b64b64b64b64b64b64b64b");
     expect(ctx.type).toBe("expense");
   });
+
+  it("rejects unknown types instead of leaking a schema error", async () => {
+    const res = await post({ name: "Food", type: "snack" });
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({
+      message: /type must be/,
+    });
+  });
+
+  it("500s (not 400s) on infrastructure failure", async () => {
+    C().instanceSave.mockRejectedValueOnce(new Error("db down"));
+    const res = await post({ name: "Food", type: "expense" });
+    expect(res.status).toBe(500);
+  });
 });
 
 describe("PUT /api/categories/[id] — rename cascade (M3)", () => {
@@ -152,6 +166,26 @@ describe("PUT /api/categories/[id] — rename cascade (M3)", () => {
 
     expect(res.status).toBe(409);
     expect(T().updateMany).not.toHaveBeenCalled();
+  });
+
+  it("409s when a budget already lives under the target name (typeless-budget collision)", async () => {
+    const cat = makeCategory("OldName");
+    C().findOne.mockResolvedValueOnce(cat);
+    B().findOne.mockResolvedValueOnce({ category: "NewName", month: "2026-08" });
+    const { PUT } = await loadIdRoute();
+
+    const res = await PUT(
+      req(`http://localhost/api/categories/${VALID_ID}`, "PUT", { name: "NewName" }),
+      { params: Promise.resolve({ id: VALID_ID }) }
+    );
+
+    expect(res.status).toBe(409);
+    await expect(res.json()).resolves.toMatchObject({
+      message: /budget with this name/,
+    });
+    expect(cat.save).not.toHaveBeenCalled();
+    expect(T().updateMany).not.toHaveBeenCalled();
+    expect(B().updateMany).not.toHaveBeenCalled();
   });
 
   it("rolls the rename back if the cascade write fails (standalone fallback)", async () => {

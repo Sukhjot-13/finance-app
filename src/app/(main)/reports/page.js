@@ -66,7 +66,9 @@ export default function ReportsPage() {
     }
     setLoading(true);
     setError("");
-    setReport(null);
+    // Keep the previous report visible while the next one loads — clearing
+    // here flashed "No Report Generated Yet" on every regeneration, and a
+    // failure then destroyed the last good report.
     try {
       const res = await api("/api/reports/generate", {
         method: "POST",
@@ -83,6 +85,14 @@ export default function ReportsPage() {
         throw new Error(errData.message || "Failed to generate report.");
       }
       const data = await res.json();
+      // Guard the shape: a malformed 200 would otherwise crash render below.
+      if (
+        !data?.summary ||
+        !Array.isArray(data.expenseDetails) ||
+        !Array.isArray(data.incomeDetails)
+      ) {
+        throw new Error("Unexpected report format. Please try again.");
+      }
       setReport(data);
     } catch (err) {
       setError(err.message);
@@ -243,7 +253,7 @@ export default function ReportsPage() {
             onClick={generateReport}
             className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-zinc-950 border border-zinc-800 text-zinc-200 hover:text-white hover:border-zinc-700 text-xs font-semibold transition-all shadow-sm"
           >
-            Generate for Current Month
+            Generate Report
             <ArrowRight size={14} />
           </button>
         </div>

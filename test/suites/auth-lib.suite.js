@@ -96,6 +96,34 @@ describe("purgeExpiredRefreshTokens", () => {
       -3
     );
   });
+
+  it("caps stored sessions at MAX_SESSIONS_PER_USER (oldest first)", async () => {
+    const User = globalThis.__models.user;
+    const tokens = Array.from({ length: 22 }, (_, i) => ({
+      token: `tok-${i}`,
+      createdAt: new Date(Date.now() - (22 - i) * 1000),
+    }));
+    User.findOne.mockResolvedValueOnce({ _id: "u", refreshTokens: tokens });
+
+    await auth.purgeExpiredRefreshTokens("u");
+
+    // first updateOne = expiry pull, second = cap pull of the 2 oldest
+    expect(User.updateOne).toHaveBeenCalledTimes(2);
+    const [, capUpdate] = User.updateOne.mock.calls[1];
+    expect(capUpdate.$pull.refreshTokens.token.$in).toEqual(["tok-0", "tok-1"]);
+  });
+
+  it("skips the cap pull when under the limit", async () => {
+    const User = globalThis.__models.user;
+    User.findOne.mockResolvedValueOnce({
+      _id: "u",
+      refreshTokens: [{ token: "a", createdAt: new Date() }],
+    });
+
+    await auth.purgeExpiredRefreshTokens("u");
+
+    expect(User.updateOne).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("verifySession (real implementation)", () => {

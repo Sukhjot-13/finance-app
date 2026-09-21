@@ -1,9 +1,9 @@
 // app/(auth)/login/page.js
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { PiggyBank, ArrowRight, Mail, KeyRound, Sparkles } from "lucide-react";
+import { PiggyBank, Mail } from "lucide-react";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -14,6 +14,10 @@ export default function LoginPage() {
   const [checkingSession, setCheckingSession] = useState(true);
   const [resendIn, setResendIn] = useState(0);
   const router = useRouter();
+  // Auto-submit (6th digit + paste) can fire twice before React flushes
+  // `loading` — a ref guard makes verification strictly single-flight so a
+  // fast typist can't double-spend rate-limit quota or double-navigate.
+  const verifyingRef = useRef(false);
 
   // Cooldown ticker for the resend button on step 2.
   useEffect(() => {
@@ -102,6 +106,8 @@ export default function LoginPage() {
 
   const handleVerifyOtp = async (e) => {
     e.preventDefault();
+    if (verifyingRef.current) return;
+    verifyingRef.current = true;
     setLoading(true);
     setError("");
     try {
@@ -113,15 +119,17 @@ export default function LoginPage() {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.message || "Invalid OTP.");
 
+      // replace (not push): post-auth Back must not return to the OTP screen.
       if (data.isNewUser) {
-        router.push("/welcome");
+        router.replace("/welcome");
       } else {
-        router.push("/dashboard");
+        router.replace("/dashboard");
       }
     } catch (err) {
       setError(err.message);
     } finally {
       setLoading(false);
+      verifyingRef.current = false;
     }
   };
 

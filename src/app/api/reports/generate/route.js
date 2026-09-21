@@ -29,7 +29,17 @@ export async function POST(request) {
 
     // Prefer absolute instants computed in the BROWSER (user's timezone) so
     // the window matches the user's calendar days; fall back to legacy string
-    // parsing (server-local) when they're absent.
+    // parsing (server-local) when they're absent. Present-but-invalid
+    // instants are a client bug → 400, not a silent fallback.
+    if (
+      (startInstant && isNaN(new Date(startInstant).getTime())) ||
+      (endInstant && isNaN(new Date(endInstant).getTime()))
+    ) {
+      return NextResponse.json(
+        { message: "Invalid instant format" },
+        { status: 400 }
+      );
+    }
     const parsedStart = startInstant ? new Date(startInstant) : null;
     const parsedEnd = endInstant ? new Date(endInstant) : null;
     const rangeStart =
@@ -51,6 +61,17 @@ export async function POST(request) {
     if (rangeStart > rangeEnd) {
       return NextResponse.json(
         { message: "Start date must be on or before the end date" },
+        { status: 400 }
+      );
+    }
+
+    // Unbounded ranges load the user's entire history into memory (find +
+    // in-memory reduce). Cap at 3 years — yearly reports stay fine, runaway
+    // windows get a clear error instead of a CPU/memory cliff.
+    const MAX_REPORT_RANGE_MS = 3 * 366 * 24 * 60 * 60 * 1000;
+    if (rangeEnd.getTime() - rangeStart.getTime() > MAX_REPORT_RANGE_MS) {
+      return NextResponse.json(
+        { message: "Report range cannot exceed 3 years" },
         { status: 400 }
       );
     }
