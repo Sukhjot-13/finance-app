@@ -14,6 +14,18 @@ Incident postmortem: 9 user documents were deleted from `test.users` externally,
 
 Transactions created before the date fix were stored at `YYYY-MM-DDT00:00:00.000Z` (UTC midnight) and render as the previous day for users west of UTC. One-off migration: add 12 hours to every transaction whose `getUTCHours() === 0 && getUTCMinutes() === 0`. (2026-08-04)
 
+### Full-project audit fixes (2026-09-21 — logged, not yet implemented)
+
+Audit (196 tests green, lint clean, build clean) found no auth-bypass or IDOR, but real items: (1) Profile page initializes form to `""`/`"USD"` not from context — a failed `/api/user` fetch + Save silently overwrites the account name (`profile/page.js:11-38`). (2) Transactions `refetchCurrentPage` never clamps `page`, so shrinking result sets strand users on empty pages that look like data loss (`transactions/page.js:482-486`). (3) Transaction PUT silently drops invalid amount/category/date with 200 instead of 400, and non-string description throws 500 (`transactions/[id]/route.js:68-79`). (4) Budget DELETE ignores its result and matches untrimmed category, reporting success when nothing was deleted (`budgets/route.js:93-120`). (5) Month windowing mixes server-TZ default month with client `start`/`end` instants around month boundaries (`budgets/route.js:16`, `budget-progress/route.js:30-38`). (6) Category rename/delete cascades are non-atomic with incomplete rollback (`categories/[id]/route.js:87-212`).
+
+---
+
+## 🔴 Vulnerabilities
+
+### Auth hardening gaps (2026-09-21 — logged, not yet fixed)
+
+(1) IP rate-limiting trusts client-supplied `x-forwarded-for`/`x-real-ip` with no verification, so per-IP OTP buckets are bypassable (`otp/send/route.js:21-25`, `otp/verify/route.js:24-28`). (2) Rate limiter fails open on DB outage — limits vanish exactly during incidents (`rate-limit.js:19-63`). (3) `verifySession` accepts rotated refresh tokens indefinitely (never checks `rotatedAt`; purge only runs on login/refresh), stretching the intended 5-min grace window (`auth.js:85-133`). (4) Logout returns success even when the DB write failed, so the session can survive a "logout" on shared devices (`logout/route.js:33-40`). (5) No guard against `ACCESS/REFRESH_TOKEN_SECRET` reuse or weak secrets (`auth.js:19-23`).
+
 ---
 
 ## 🟡 New Features
