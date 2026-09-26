@@ -13,7 +13,7 @@ A Next.js 16 personal finance tracking application with OTP-based authentication
 
 | File | Purpose |
 |------|---------|
-| `/package.json` | Project metadata, scripts (dev/build/start/lint/test), dependencies |
+| `/package.json` | Project metadata, scripts (dev/build/start/lint/test/cap:sync/cap:open/cap:run), dependencies |
 | `/next.config.mjs` | Next.js configuration (webpack fallbacks, baseline security headers; CSP is set per-request by the proxy) |
 | `/vitest.config.mjs` | Vitest config: **single-entry runner** (`test/run-all.test.js` only), jsdom environment, `@` alias → `./src`, plus a tiny esbuild plugin that lets JSX inside `src/**/*.js` transform for component tests |
 | `/postcss.config.mjs` | PostCSS configuration for Tailwind CSS |
@@ -27,6 +27,14 @@ A Next.js 16 personal finance tracking application with OTP-based authentication
 | `/docs/updateapp.md` | Guide on updating the iOS app (Vercel automatic deploys, local testing, native updates, 7-day cert renewal) |
 | `/docs/audit.md` | Audit status (both 2026-08-22 cycles closed — no open items; standing verification + intentional-behavior notes only) |
 | `/docs/suggestions.md` | Suggestions / improvement / vulnerability log (open items only — completed ones removed, history in git) |
+| `/AGENTS.md` | Repo-local AI behavior + architecture-docs conventions (mirrors global rules; PermissionGate standard) |
+| `/passkey-integration-plan.md` | Design-only plan for future WebAuthn/passkey login (proposes `RP_NAME`/`RP_ID`/`ORIGIN`, new routes, user-model `passkeys` array — NOT implemented, no src references) |
+| `/package-lock.json` | Locked dependency tree (npm install reproducibility) |
+| `/.gitignore` | Git ignores (node_modules, .next, env files, orphan-tx backup JSONs) |
+| `/.gitattributes` | Git attributes (line-ending / diff config) |
+| `/public/file.svg`, `/public/globe.svg` | Static Next.js template SVGs (no code references; matcher excludes `.*\.[^/]+$` so proxy skips them) |
+| `/src/app/favicon.ico` | App favicon (excluded from proxy matcher) |
+| `/src/app/a.svg` | Static SVG asset served from the app dir (excluded from proxy matcher by extension rule) |
 
 ### Test Suite (`/test/`)
 
@@ -77,6 +85,7 @@ A Next.js 16 personal finance tracking application with OTP-based authentication
 - **`src/proxy.js`** - Next.js Proxy (Middleware) for route protection AND Content-Security-Policy generation.
   - `buildCsp(nonce)` - Builds the strict CSP string: `script-src 'self' 'nonce-…' 'strict-dynamic'` (+ `'unsafe-eval'` in dev only), `style-src 'self' 'unsafe-inline'` (Chart.js/Framer Motion tuning), locked-down `img/font/connect/object/base-uri/form-action/frame-ancestors`.
   - `proxy()` - Auth routing: logged-in users hitting `/login` → `/dashboard`. Public paths: `/login`, `/api` (**NOTE: `/welcome` is deliberately NOT in either list** — new users arrive there with fresh cookies after OTP verify and must NOT be bounced; anonymous visitors are redirected to `/login` by the protected-path check). `/api/*` requests pass through untouched (routes self-auth). Page requests get a per-request CSP nonce: sets `x-nonce` + `Content-Security-Policy` on the REQUEST headers (so Next stamps the nonce onto its own scripts) and on the response. Config matcher: all paths except `_next/static`, `_next/image`, `favicon.ico`, any path with a file extension.
+  - `config` - Exported matcher (`/((?!_next/static|_next/image|favicon.ico|.*\.[^/]+$).*)`) so static assets and files with extensions skip the proxy.
 
 ---
 
@@ -119,7 +128,9 @@ A Next.js 16 personal finance tracking application with OTP-based authentication
 - **`src/app/(main)/profile/page.js`** - Profile settings ("use client").
   - `ProfilePage()` - Reads `{ user, setUser }` from context and seeds the form FROM context (never blank defaults); refreshes from server on mount. Save is DISABLED until a successful load (`ready`) and the name is trimmed + blank-rejected — a failed fetch can never lead to a blank-overwrite save. A load failure shows an amber banner with Reload. Save propagates via `setUser((prev) => ({...prev, …}))`. accountName maxLength 60. Currency select falls back to displaying an out-of-list stored value rather than a blank selection. Security section: two-step inline confirm "Log Out From All Devices" → `POST /api/auth/logout-all` then hard `window.location.href = "/login"`.
 
-- Error boundaries `src/app/(main)/error.js` and `src/app/error.js` unchanged (recoverable cards with Try again).
+- Error boundaries (recoverable cards with Try again + console.error logging):
+  - `src/app/error.js` - `RootError({ error, reset })` — root-segment boundary (root layout itself needs `global-error.js`, intentionally not used).
+  - `src/app/(main)/error.js` - `MainError({ error, reset })` — main-shell segment boundary so a (main) page crash shows a recoverable screen instead of a white page.
 
 ---
 
@@ -210,9 +221,12 @@ A Next.js 16 personal finance tracking application with OTP-based authentication
 ### Utility Libraries (`/src/lib/`)
 
 - **`src/lib/mongodb.js`** - Singleton Mongoose connection (`bufferCommands:false`, pool 10, timeouts). Resets cached promise on failure. Reads `MONGODB_URI` lazily inside `dbConnect()` (never at import — since 2026-09-26, so `next build` succeeds without env configured).
+  - `dbConnect()` - Default export; throws a clear "define MONGODB_URI" error only when a DB op actually runs without env; returns the cached connection.
 
 - **`src/lib/auth.js`** - Authentication utilities.
   - Secrets: read lazily per call via `getAccessSecret()` / `getRefreshSecret()` (throw the same "Missing JWT secret" error only when an auth op actually runs without env — since 2026-09-26, so `next build` succeeds without env configured); weak-secret warnings (<32 chars, reused across domains) fire once via `warnAboutWeakSecrets()`. Constants: `MAX_SESSIONS_PER_USER` (20), `REFRESH_TOKEN_TTL_MS` (30d), `REFRESH_ROTATION_GRACE_MS` (5 min).
+  - `getAccessSecret()` / `getRefreshSecret()` - Lazy `process.env` readers; throw on missing secret, else call `warnAboutWeakSecrets()` and return the secret.
+  - `warnAboutWeakSecrets()` - Once-per-process console warnings for short (<32 chars) or identical access/refresh secrets.
   - `hashToken(token)` - SHA-256 hex digest used to store/lookup refresh tokens.
   - `generateAccessToken(userId)` / `generateRefreshToken(userId)` (includes `jti`).
   - `verifyToken(token, secret)` - jsonwebtoken verify wrapper returning null on error.
@@ -228,13 +242,13 @@ A Next.js 16 personal finance tracking application with OTP-based authentication
 
 - **`src/lib/utils.js`** - `formatCurrency` (en-IN for INR), `formatDate`, `formatDateForInput` (local getters), `MONTH_KEY_RE` + `isValidMonthKey` (strict calendar months — `2026-13` rejected), `utcMonthKey` (deterministic UTC fallback keys). Covered by unit tests.
 
-- **`src/lib/api.js`** - Fetch wrapper with automatic token refresh. Contract:
+- **`src/lib/api.js`** - Fetch wrapper with automatic token refresh. Exports: `processQueue(outcome)` (settles the single-flight queue), `refreshSingleFlight()` (one refresh call, serialized across tabs via Web Locks), default `api(url, options)` (at-most-once retry via `_authRetried`, single-flight queue, definitive-401 → `/login` redirect only). Contract:
   - Each request retries **at most once** after a refresh (`options._authRetried` guard) — a second 401 is handed back, never looped/deadlocked (regression-tested).
   - Concurrent 401s queue behind ONE in-flight refresh (`isRefreshing` + `failedQueue`).
   - Refreshes are serialized ACROSS tabs via Web Locks (`navigator.locks.request("fintrack-auth-refresh")`) where supported.
   - Only a definitive refresh rejection (HTTP 401) redirects to `/login`. Network errors and 5xx are transient: they reject the request with an error for the caller's inline UI — no forced logout during backend blips.
 
-- **`src/lib/constants.js`** - Default expense/income category lists.
+- **`src/lib/constants.js`** - Default expense/income category lists. Exports: `defaultExpenseCategories[]` (Food/Groceries/Transport/Bills/Housing/Entertainment/Health/Shopping/Other), `defaultIncomeCategories[]` (Salary/Bonus/Freelance/Investment/Other).
 
 ---
 
@@ -248,7 +262,7 @@ A Next.js 16 personal finance tracking application with OTP-based authentication
 
 - **`src/components/BudgetProgress.js`** - Dashboard budget bars. Sends `start`+`end`+`month` (client-local window). **Load failures now render an explicit error card with a Retry button — the section never silently vanishes** (Retry resets visible state user-initiated, bumps fetch attempt). Color-coded progress (indigo/amber/red), overall + per-category sections, "(excl. X in one-time expenses)" note. Consumes `{ user }` from context.
 
-- **`src/components/BudgetManager.js`** - Budget-setting drawer (month snapshotted on open via ref — a month flip mid-edit can't overwrite drafts):
+- **`src/components/BudgetManager.js`** - Budget-setting drawer (month snapshotted on open via ref — a month flip mid-edit can't overwrite drafts). Exports: default `BudgetManager({ isOpen, onClose, onSaved })`; internal `getCurrentMonth()` (local `YYYY-MM` snapshot helper):
   - Form holds RAW input strings (never `parseFloat` on keystroke — NaN/0 used to masquerade as "cleared" and get deleted); Save validates first (0/negative/non-numeric → named inline error, never a silent delete).
   - Trash only clears the FIELD — server deletes happen exclusively on Save (matching the drawer's copy; stray clicks are no longer destructive). **Save deletes budgets whose fields were cleared** (clearing ≠ silently keeping the old limit); the snapshot drops cleared keys so a second Save can't re-DELETE into 404s.
   - Upserts run before any delete, per-category results naming failures; deletes only proceed when every upsert succeeded.
@@ -300,8 +314,12 @@ The application is packaged as an iOS app using Capacitor (Swift Package Manager
   - Development override: supports `process.env.CAPACITOR_SERVER_URL` (e.g. `http://localhost:3000` or local Wi-Fi IP).
   - Background color: `#09090b` (eliminates white flashes on launch).
   - Native plugins: `@capacitor/status-bar` (styled dark `#09090b`), `@capacitor/haptics`.
-- **`ios/App/App.xcodeproj`**: The native Xcode project for building and running on iOS simulators or connected physical iPhones.
-- **`ios/App/App/AppDelegate.swift`**: Native iOS entry point initializing the Capacitor bridge and WKWebView.
+- **`ios/App/App.xcodeproj`**: The native Xcode project for building and running on iOS simulators or connected physical iPhones (excluded derived-data/build artifacts are not inventoried).
+- **`ios/App/App/AppDelegate.swift`**: Native iOS entry point initializing the Capacitor bridge and WKWebView (`application(_:didFinishLaunchingWithOptions:)`, background/foreground lifecycle stubs, `application(_:configurationForConnecting:options:)` wiring `SceneDelegate`).
+- **`ios/App/App/SceneDelegate.swift`**: Scene lifecycle delegate for the Capacitor web view session.
+- **`ios/App/App/Info.plist`**: Bundle config (reads `$(CAPACITOR_DEBUG)` flag).
+- **`ios/App/CapApp-SPM/`**: Swift Package Manager wrapper (`Package.swift`, `Sources/CapApp-SPM/CapApp-SPM.swift`, `.gitignore`, `README.md`) for Capacitor plugins.
+- **`ios/debug.xcconfig`**: `CAPACITOR_DEBUG = true` build setting. **`ios/.gitignore`**: iOS-local ignores.
 - **Safe Area Insets**: Viewport configured with `viewportFit: "cover"` in `src/app/layout.js`, and `pt-safe` / `pb-safe` utilities defined in `src/app/globals.css` ensuring headers and drawers respect the iPhone notch and Dynamic Island.
 
 ---
@@ -315,10 +333,10 @@ Define all of these in a `.env.local` file at the project root.
 | `MONGODB_URI` | MongoDB connection string (database: `fintrack_db`) — also backs the rate-limit collection | `src/lib/mongodb.js` |
 | `BREVO_API_KEY` | Brevo (Sendinblue) API key for sending OTP emails | `src/app/api/auth/otp/send/route.js` |
 | `EMAIL_FROM` | Verified sender email for Brevo | `src/app/api/auth/otp/send/route.js` |
-| `ACCESS_TOKEN_SECRET` | JWT secret for access tokens (15min expiry) | `src/lib/auth.js` |
-| `REFRESH_TOKEN_SECRET` | JWT secret for refresh tokens (30d expiry, rotated on use) | `src/lib/auth.js`, refresh route |
-| `JWT_SECRET` | Additional JWT secret (reserved) | — |
-| `NODE_ENV` | Environment mode (`development` adds `'unsafe-eval'` to CSP script-src; controls cookie security) | proxy, auth routes |
+| `ACCESS_TOKEN_SECRET` | JWT secret for access tokens (15min expiry) | `src/lib/auth.js` (`getAccessSecret`) |
+| `REFRESH_TOKEN_SECRET` | JWT secret for refresh tokens (30d expiry, rotated on use) | `src/lib/auth.js` (`getRefreshSecret`), `src/app/api/auth/refresh/route.js`, `src/app/api/auth/logout/route.js`, `src/app/api/auth/logout-all/route.js` (direct `verifyToken`/`jwt.verify` calls read `process.env` at request time) |
+| `JWT_SECRET` | Reserved/unused — no `src/` references (grep 2026-09-26); kept in README template only | — |
+| `NODE_ENV` | Environment mode (`development` adds `'unsafe-eval'` to CSP script-src; controls cookie `secure` flags; `SimpleChart` dev-only error detail) | `src/proxy.js`, auth routes (`refresh`, `otp/verify`), `src/components/SimpleChart.js` |
 | `CAPACITOR_SERVER_URL` | (Optional) Overrides the target URL loaded by the iOS app (defaults to `https://fintrack.vistaenvision.com`) | `capacitor.config.ts` |
 
 ### Generating JWT Secrets
