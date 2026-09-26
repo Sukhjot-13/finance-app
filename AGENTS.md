@@ -338,7 +338,7 @@ Example: two users may both have `resume:edit`, but User A must not automaticall
 For resource actions, evaluate both capability and resource context:
 
 ```js
-can(user, P.RESUME_EDIT, { resource: resume });
+can(user, P.RESUME_EDIT, { resource: resume })
 ```
 
 Typical resource checks include:
@@ -417,7 +417,7 @@ The canonical unrestricted authority is the protected root `ADMIN` role at rank 
 Do not casually combine mechanisms such as:
 
 ```js
-role.isAdmin === true || permissions.includes("ALL") || roleLevel <= 0;
+role.isAdmin === true || permissions.includes("ALL") || roleLevel <= 0
 ```
 
 Instead, implement one centrally tested root-Admin rule inside the authorization service. If the implementation internally uses a wildcard/superuser marker, it must be an implementation detail of the protected Admin policy rather than an ordinary assignable permission.
@@ -433,7 +433,7 @@ The root authority mechanism must:
 
 ## 15. Permission Administration and Delegation
 
-Permission administration is distinct from the frontend `PermissionGate`. Use separate concepts/permissions so an AI or developer never confuses the ability to _check_ a permission with the ability to _edit_ the permission system.
+Permission administration is distinct from the frontend `PermissionGate`. Use separate concepts/permissions so an AI or developer never confuses the ability to *check* a permission with the ability to *edit* the permission system.
 
 Use at least these conceptual capabilities (names may be adapted to the project's naming convention):
 
