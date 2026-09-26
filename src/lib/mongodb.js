@@ -1,14 +1,10 @@
 // app/lib/mongodb.js
 import mongoose from "mongoose";
 
-const MONGODB_URI = process.env.MONGODB_URI;
-
-if (!MONGODB_URI) {
-  throw new Error(
-    "Please define the MONGODB_URI environment variable inside .env.local"
-  );
-}
-
+// The URI is read lazily inside dbConnect (never at import time) so that
+// `next build` — which imports every route — succeeds without env vars
+// configured. Any actual DB operation without MONGODB_URI throws the same
+// clear error the old import-time check produced.
 let cached = global.mongoose;
 
 if (!cached) {
@@ -16,6 +12,14 @@ if (!cached) {
 }
 
 async function dbConnect() {
+  const MONGODB_URI = process.env.MONGODB_URI;
+
+  if (!MONGODB_URI) {
+    throw new Error(
+      "Please define the MONGODB_URI environment variable inside .env.local"
+    );
+  }
+
   if (cached.conn) {
     return cached.conn;
   }

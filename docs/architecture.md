@@ -209,10 +209,10 @@ A Next.js 16 personal finance tracking application with OTP-based authentication
 
 ### Utility Libraries (`/src/lib/`)
 
-- **`src/lib/mongodb.js`** - Singleton Mongoose connection (`bufferCommands:false`, pool 10, timeouts). Resets cached promise on failure.
+- **`src/lib/mongodb.js`** - Singleton Mongoose connection (`bufferCommands:false`, pool 10, timeouts). Resets cached promise on failure. Reads `MONGODB_URI` lazily inside `dbConnect()` (never at import — since 2026-09-26, so `next build` succeeds without env configured).
 
 - **`src/lib/auth.js`** - Authentication utilities.
-  - Constants: `ACCESS_TOKEN_SECRET`, `REFRESH_TOKEN_SECRET` (throw at import if missing; warn if <32 chars or reused across domains), `MAX_SESSIONS_PER_USER` (20), `REFRESH_TOKEN_TTL_MS` (30d), `REFRESH_ROTATION_GRACE_MS` (5 min).
+  - Secrets: read lazily per call via `getAccessSecret()` / `getRefreshSecret()` (throw the same "Missing JWT secret" error only when an auth op actually runs without env — since 2026-09-26, so `next build` succeeds without env configured); weak-secret warnings (<32 chars, reused across domains) fire once via `warnAboutWeakSecrets()`. Constants: `MAX_SESSIONS_PER_USER` (20), `REFRESH_TOKEN_TTL_MS` (30d), `REFRESH_ROTATION_GRACE_MS` (5 min).
   - `hashToken(token)` - SHA-256 hex digest used to store/lookup refresh tokens.
   - `generateAccessToken(userId)` / `generateRefreshToken(userId)` (includes `jti`).
   - `verifyToken(token, secret)` - jsonwebtoken verify wrapper returning null on error.

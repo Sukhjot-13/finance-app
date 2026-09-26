@@ -4,8 +4,49 @@ import { randomUUID, createHash } from "crypto";
 import { cookies } from "next/headers";
 import { jwtVerify } from "jose";
 
-const ACCESS_TOKEN_SECRET = process.env.ACCESS_TOKEN_SECRET;
-const REFRESH_TOKEN_SECRET = process.env.REFRESH_TOKEN_SECRET;
+// Secrets are read lazily (per call, never at import time) so that
+// `next build` — which imports every route — succeeds without env vars
+// configured. Any actual auth operation without secrets throws the same
+// clear error the old import-time check produced.
+function getAccessSecret() {
+  const secret = process.env.ACCESS_TOKEN_SECRET;
+  if (!secret) {
+    throw new Error("Missing JWT secret environment variables.");
+  }
+  warnAboutWeakSecrets();
+  return secret;
+}
+
+function getRefreshSecret() {
+  const secret = process.env.REFRESH_TOKEN_SECRET;
+  if (!secret) {
+    throw new Error("Missing JWT secret environment variables.");
+  }
+  warnAboutWeakSecrets();
+  return secret;
+}
+
+let secretsWarned = false;
+
+// Fail-fast is not enough: weak or reused secrets silently collapse
+// security. Warn loudly in every environment so misconfiguration is seen.
+function warnAboutWeakSecrets() {
+  if (secretsWarned) return;
+  secretsWarned = true;
+  const access = process.env.ACCESS_TOKEN_SECRET;
+  const refresh = process.env.REFRESH_TOKEN_SECRET;
+  if (!access || !refresh) return;
+  if (access.length < 32 || refresh.length < 32) {
+    console.warn(
+      "auth: JWT secret shorter than 32 chars — generate with `openssl rand -base64 32`."
+    );
+  }
+  if (access === refresh) {
+    console.warn(
+      "auth: ACCESS_TOKEN_SECRET and REFRESH_TOKEN_SECRET are identical — token-domain separation is lost. Use distinct secrets."
+    );
+  }
+}
 
 // Must match the JWT expiresIn for refresh tokens below
 export const REFRESH_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000;
@@ -16,25 +57,6 @@ export const REFRESH_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 // the grace window a presented rotated token is treated as token theft.
 export const REFRESH_ROTATION_GRACE_MS = 5 * 60 * 1000;
 
-if (!ACCESS_TOKEN_SECRET || !REFRESH_TOKEN_SECRET) {
-  throw new Error("Missing JWT secret environment variables.");
-}
-
-// Fail-fast is not enough: weak or reused secrets silently collapse
-// security. Warn loudly in every environment so misconfiguration is seen.
-if (ACCESS_TOKEN_SECRET.length < 32 || REFRESH_TOKEN_SECRET.length < 32) {
-  console.warn(
-    "auth: JWT secret shorter than 32 chars — generate with `openssl rand -base64 32`."
-  );
-}
-if (ACCESS_TOKEN_SECRET === REFRESH_TOKEN_SECRET) {
-  console.warn(
-    "auth: ACCESS_TOKEN_SECRET and REFRESH_TOKEN_SECRET are identical — token-domain separation is lost. Use distinct secrets."
-  );
-}
-
-const accessTokenSecret = new TextEncoder().encode(ACCESS_TOKEN_SECRET);
-
 /**
  * Refresh tokens are stored in MongoDB as SHA-256 hashes — a database leak
  * must not expose usable session tokens. Legacy plaintext entries are still
@@ -44,11 +66,11 @@ export const hashToken = (token) =>
   createHash("sha256").update(token).digest("hex");
 
 export const generateAccessToken = (userId) => {
-  return jwt.sign({ userId }, ACCESS_TOKEN_SECRET, { expiresIn: "15m" });
+  return jwt.sign({ userId }, getAccessSecret(), { expiresIn: "15m" });
 };
 
 export const generateRefreshToken = (userId) => {
-  return jwt.sign({ userId, jti: randomUUID() }, REFRESH_TOKEN_SECRET, {
+  return jwt.sign({ userId, jti: randomUUID() }, getRefreshSecret(), {
     expiresIn: "30d",
   });
 };
@@ -80,6 +102,7 @@ export const verifyAuth = async () => {
   if (!token) return { user: null };
 
   try {
+    const accessTokenSecret = new TextEncoder().encode(getAccessSecret());
     const { payload } = await jwtVerify(token, accessTokenSecret);
     return { user: { _id: payload.userId } };
   } catch (err) {
@@ -110,7 +133,7 @@ export const verifySession = async () => {
   // Signature/expiry problems are definitive auth failures.
   let decoded;
   try {
-    decoded = jwt.verify(accessToken, ACCESS_TOKEN_SECRET);
+    decoded = jwt.verify(accessToken, getAccessSecret());
   } catch {
     return { user: null, error: "Invalid or expired access token", status: 401 };
   }
