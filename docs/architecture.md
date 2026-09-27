@@ -44,7 +44,7 @@ A Next.js 16 personal finance tracking application with OTP-based authentication
 |------|--------|
 | `/test/run-all.test.js` | Single entry: sets test env vars, registers ALL shared module mocks (delegating factories → `globalThis.*`), imports every suite |
 | `/test/helpers/setup.js` | Stable globalThis mock singletons (models registry, dbConnect, cookies store, api mock, router, Brevo client) + DOM stubs (ResizeObserver/matchMedia) |
-| `/test/helpers/mocks.js` | `makeQueryBuilder()` chainable awaitable stub; `makeModel()` constructable mongoose-model-shaped mock with spied statics; registry factory |
+| `/test/helpers/mocks.js` | `makeQueryBuilder()` chainable awaitable stub; `makeModel()` constructable mongoose-model-shaped mock with spied statics; registry factory (transaction/category/budget/user/rateLimit/recurring) |
 | `/test/suites/utils.suite.js` | `lib/utils`: formatCurrency USD/INR/null/negative, formatDate, formatDateForInput local parts/padding/rejections, isValidMonthKey (rejects 2026-13/00), utcMonthKey determinism |
 | `/test/suites/auth-lib.suite.js` | `lib/auth`: hashToken SHA-256 properties, access/refresh token roundtrip (+jti), verifyToken garbage→null, purgeExpiredRefreshTokens $pull cutoffs + 20-session cap (oldest-first, skipped under limit), REAL verifySession branches (missing tokens 401, bad access 401 w/o DB, success via hash + legacy-plaintext $or arms, revoked 401, transient DB 503) |
 | `/test/suites/api-client.suite.js` | `lib/api` refresh contract: pass-through, retry-once, transient 500/network ≠ logout, definitive 401 → /login, deadlock regression (retried 401 returned not hung), concurrent single-flight queue |
@@ -59,6 +59,7 @@ A Next.js 16 personal finance tracking application with OTP-based authentication
 | `/test/suites/api-categories.suite.js` | GET merge/dedupe/allCustom; POST required/enum-validated type/cap/409/malformed-JSON/create-scoped/DB-outage 500; PUT rename (ObjectId 404 pre-DB, JSON guard, no-op fast path, budget-collision 409 pre-check, cascade old→new to transactions+budgets, duplicate→409 without cascade, full revert incl. tx/budget re-point on cascade failure, name validation); DELETE reassign Other + budget cleanup + best-effort doc restore + 404-no-side-effects |
 | `/test/suites/api-budgets.suite.js` | GET month default (UTC)/verbatim; POST M4 strict guards (missing fields, strict YYYY-MM incl. impossible months, malformed JSON 400, non-finite/sub-1 amounts, numeric-string coercion, trimmed category, 50-char cap, dup→409, DB-outage 500); DELETE required param/trimmed match/strict month/404-when-absent/owner scope |
 | `/test/suites/api-reports.suite.js` | dashboard aggregates with $gte/$lt client bounds + present-but-invalid start/end → 400 + balance math + server-month fallback + zero-fill; budget-progress overall/category blend, strict monthKey (400 on garbage/impossible), month-derived-from-window when absent, capped percentage, overBudget flags, excluded spend, month fallback; generate instants preferred (invalid instant → 400), 3-year range cap, reversed-range 400, summary math, sorted breakdowns |
+| `/test/suites/recurring.suite.js` (2026-09-26) | `advanceRuleDate` weekly/monthly; `firstRunDate` monthly-today/monthly-next/weekly-weekday; `materializeDueRules` multi-occurrence + advance-past-now, 12-run cap, nothing-due no-op; recurring routes (auth gate, list, body validation, create, 404s, bad-amount 400); export `sanitizeCsvCell` injection guards, auth gate, CSV happy path, bad-bounds 400 |
 | `/test/suites/budget-components.suite.jsx` | BudgetProgress success bars/exclusion note, error banner + Retry recovery (B1), null when nothing to show; BudgetManager prefilled inputs, load-error banner + Retry hiding save (B2), Escape close (U2), dialog semantics (U3), clear-on-save deletes budgets server-side |
 | `/test/suites/overlay-components.suite.jsx` | AddTransactionDrawer dialog semantics + autofocus, Escape close, type-switch category reset guard, add-new-category reveal (50-cap), noon-local submit payload, category-load error note, interrupted-draft restore on reopen; EditTransactionModal semantics, category-load modalError, type-switch keeps shared names, modalError inline on save failure, sends ONLY editable fields |
 | `/test/suites/page-components.suite.jsx` | ProfileDropdown two-step logout confirm + cancel (U1); WelcomePage skip PUTs onboarded + replace-navigates (failure stays put with inline error), save completes onboarding in one call (trimmed), inline server errors (B3); LoginPage 30s resend cooldown countdown/auto-submit at 6 digits single-flight (digits filtered, replace-navigates)/different-email reset; TransactionsPage page-clamp after deleting last row of page 2 (B4); MainLayout navigation renders desktop sidebar and keeps mobile drawer closed by default |
@@ -199,9 +200,17 @@ A Next.js 16 personal finance tracking application with OTP-based authentication
 
 - **`src/app/api/reports/generate/route.js`** - Prefers browser-timezone `startInstant`/`endInstant` (present-but-invalid → 400); validates formats (400) and rejects reversed ranges (400) and ranges over 3 years (400 — unbounded windows load full history into memory). Summary + expense/income breakdowns sorted desc.
 
+- **`src/app/api/reports/export/route.js`** (2026-09-26) - CSV download of transactions with optional `start`/`end`/`type` filters (invalid bounds → 400). `sanitizeCsvCell()` neutralizes spreadsheet formula injection (`= + - @` tab CR); `MAX_ROWS` 10000 cap with `X-Export-Truncated` header; `no-store` cache.
+
+- **`src/app/api/recurring/route.js`** (2026-09-26) - `GET` lists the user's rules; `POST` validates (type/amount/category/frequency/dayOfMonth 1–28/dayOfWeek 0–6/description) and creates with `firstRunDate()`-computed `nextRunAt`.
+
+- **`src/app/api/recurring/[id]/route.js`** (2026-09-26) - `PATCH` edits amount/category/description/active on owned rules (404 otherwise; schedule changes go through delete + recreate); `DELETE` removes the rule (materialized Transactions stay as history).
+
 ---
 
 ### MongoDB Models
+
+- **`src/models/recurring.model.js`** (2026-09-26) - Recurring rule: `userId*`, `type*`, `amount*`, `category*`, `description`, `frequency*` (weekly/monthly), `dayOfMonth` (1–28), `dayOfWeek` (0–6), `nextRunAt*`, `lastRunAt`, `active`. Index on `(userId, active, nextRunAt)`. Materialized by `src/lib/recurring.js` (check-on-login, no cron).
 
 - **`src/models/user.model.js`**
   - Fields: email (unique, validated), accountName, **onboarded** (bool — set when onboarding is completed OR skipped; drives `isNewUser`), otp (hashed, temp), otpExpires, role, currency (USD/INR), refreshTokens.
@@ -235,6 +244,8 @@ A Next.js 16 personal finance tracking application with OTP-based authentication
   - `purgeExpiredRefreshTokens(userId)` - Pulls entries older than TTL OR rotated-past-grace, then caps stored sessions at `MAX_SESSIONS_PER_USER` (20, oldest-first) so devices age out.
 
 - **`src/lib/rate-limit.js`** - MongoDB-backed sliding-window limiter with **static imports** (`@/lib/mongodb`, `@/models/ratelimit.model`). `recordHit(key, windowMs)` (pushes timestamp, $slice-capped), `countRecentHits(key, windowMs)` (aggregate $filter count), `recordHitAndCount(key, windowMs, max)` (atomic record-then-count — closes the check-then-act race; returns `{allowed, count}`), `getClientIp(request)` (x-real-ip preferred, else LAST x-forwarded-for entry — first entries are client-spoofable), `popLastHit(key)` (refund quota), `resetKey(key)` (clear on success). Every helper **fails open** on DB errors so the limiter can never lock everyone out during an incident (safe: every guarded op also needs the DB, so fail-open grants nothing).
+
+- **`src/lib/recurring.js`** (2026-09-26) - Check-on-login recurring engine (no cron): `advanceRuleDate()` (pure, +7d weekly / +1mo monthly), `firstRunDate()` (pure, UTC), `MAX_CATCH_UP_RUNS` (12), `materializeDueRules(userId, deps)` (creates Transactions for due occurrences, caps catch-up, always advances past now; injectable models for tests). Called best-effort from OTP verify success — never blocks login.
 
 - **`src/lib/useDialogA11y.js`** *(new)* - Shared hook powering ALL modal overlays (AddTransactionDrawer, EditTransactionModal, BudgetManager): Escape-to-close, Tab/Shift+Tab focus trap inside the panel, body scroll lock + restore, initial focus to `[data-autofocus]` (else first focusable), and focus return to the previously focused element on close.
 

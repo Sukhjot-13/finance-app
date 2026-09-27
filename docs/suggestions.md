@@ -10,9 +10,9 @@
 
 Incident postmortem: 9 user documents were deleted from `test.users` externally, orphaning 97 transactions (relinked 2026-08-22; backup `.backup-orphan-txs-*.json`, gitignored). **Recurrence 2026-09-21:** user `sukhjotsingh441@gmail.com` doc (`6a891e96…`) deleted externally again; OTP login created fresh doc (`6ab14ee0…`) today, orphaning 25 transactions — relinked `6a891e96…` → `6ab14ee0…`, backup `.backup-orphan-txs-2026-09-21T15-41-04.json`. Same root cause (direct Atlas write access / no snapshots). Atlas M0 has no automatic snapshots — upgrade to M10 for continuous backup, or schedule periodic `mongodump`s. Also limit who has direct write access to the cluster via the Atlas UI.
 
-### Migrate legacy transaction dates (stored at UTC midnight)
+### Migrate legacy transaction dates (implemented 2026-09-26)
 
-Transactions created before the date fix were stored at `YYYY-MM-DDT00:00:00.000Z` (UTC midnight) and render as the previous day for users west of UTC. One-off migration: add 12 hours to every transaction whose `getUTCHours() === 0 && getUTCMinutes() === 0`. (2026-08-04)
+One-off script `scripts/migrate-legacy-dates.mjs` (dry-run by default, `--apply` to write): shifts every `getUTCHours() === 0 && getUTCMinutes() === 0` transaction +12h. Run with `MONGODB_URI` set when ready.
 
 ---
 
@@ -20,11 +20,11 @@ Transactions created before the date fix were stored at `YYYY-MM-DDT00:00:00.000
 
 ### CSV/PDF export
 
-Export transactions or reports as CSV. Relatively straightforward since the data is already aggregated.
+CSV export implemented 2026-09-26 (`GET /api/reports/export` with start/end/type filters, formula-injection guard, 10k cap). PDF variant still open. Data already aggregated, same route pattern applies.
 
-### Recurring transactions
+### Recurring transactions (implemented 2026-09-26)
 
-Monthly bills/subscriptions that auto-create transactions. More complex — would need a cron job or check-on-login pattern.
+Monthly/weekly rules (`Recurring` model + `/api/recurring` CRUD) auto-materialize on login (check-on-login, 12-run catch-up cap) — no cron needed. UI for managing rules is the remaining gap if wanted.
 
 ### Dark Fintech UI Overhaul (Completed 2026-09-11)
 

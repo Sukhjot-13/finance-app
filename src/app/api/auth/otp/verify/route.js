@@ -122,6 +122,15 @@ export async function POST(req) {
     // TTL indexes don't work on subdocument arrays — prune stale sessions
     await purgeExpiredRefreshTokens(user._id);
 
+    // Check-on-login recurring engine: materialize due occurrences into
+    // Transactions. Best-effort — a failure here must never block login.
+    try {
+      const { materializeDueRules } = await import("@/lib/recurring");
+      await materializeDueRules(user._id);
+    } catch (error) {
+      console.error("Recurring materialization on login failed:", error.message);
+    }
+
     // Set cookies. sameSite "lax" (not "strict"): strict cookies are NOT
     // sent on top-level navigations from other sites, so following an
     // external link to the app looked like a logged-out visit and bounced

@@ -69,5 +69,6 @@ export function makeModelsRegistry() {
     budget: makeModel("Budget"),
     user: makeModel("User"),
     rateLimit: makeModel("RateLimit"),
+    recurring: makeModel("Recurring"),
   };
 }

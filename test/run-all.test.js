@@ -55,6 +55,9 @@ vi.mock("@/models/user.model", () => ({
 vi.mock("@/models/ratelimit.model", () => ({
   default: globalThis.__models.rateLimit,
 }));
+vi.mock("@/models/recurring.model", () => ({
+  default: globalThis.__models.recurring,
+}));
 
 // ---- client fetch wrapper ----
 vi.mock("@/lib/api", () => ({
@@ -114,6 +117,7 @@ await Promise.all([
   import("./suites/api-categories.suite.js"),
   import("./suites/api-budgets.suite.js"),
   import("./suites/api-reports.suite.js"),
+  import("./suites/recurring.suite.js"),
   import("./suites/budget-components.suite.jsx"),
   import("./suites/overlay-components.suite.jsx"),
   import("./suites/page-components.suite.jsx"),
