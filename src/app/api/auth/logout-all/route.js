@@ -4,6 +4,7 @@ import { sendSuccess, sendError } from "@/lib/server-utils";
 import { verifyToken } from "@/lib/auth";
 import User from "@/models/user.model";
 import dbConnect from "@/lib/mongodb";
+import { logServerError } from "@/lib/manager";
 
 export async function POST(req) {
   const cookieStore = await cookies();
@@ -35,6 +36,7 @@ export async function POST(req) {
     // + machine-readable code rather than a 500 that contradicts the
     // response the client actually needs to act on.
     console.error("Logout-all error:", error?.message);
+    logServerError("Logout-all error", error, { route: "POST /api/auth/logout-all" });
     return sendSuccess({
       message:
         "Signed out on this device, but other devices may still be signed in. Please log back in and try again.",

@@ -5,6 +5,7 @@ import Transaction from "@/models/transaction.model";
 import { verifySession } from "@/lib/auth";
 import { NextResponse } from "next/server";
 import { fromMinorUnits } from "@/lib/money";
+import { logServerError } from "@/lib/manager";
 
 // Max rows per export — a full-history dump must not hammer the tier.
 const MAX_ROWS = 10000;
@@ -112,6 +113,7 @@ export async function GET(req) {
     });
   } catch (error) {
     console.error("GET /api/reports/export error:", error.message);
+    logServerError("GET /api/reports/export error", error, { route: "GET /api/reports/export" });
     return NextResponse.json({ message: "Failed to export transactions." }, { status: 500 });
   }
 }

@@ -3,6 +3,7 @@ import dbConnect from "@/lib/mongodb";
 import User from "@/models/user.model";
 import { verifySession } from "@/lib/auth"; // Import the new function
 import { NextResponse } from "next/server";
+import { logServerError } from "@/lib/manager";
 
 // GET user details
 export async function GET(req) {
@@ -21,6 +22,7 @@ export async function GET(req) {
     return NextResponse.json(userData, { status: 200 });
   } catch (dbError) {
     console.error("GET /api/user error:", dbError.message);
+    logServerError("GET /api/user error", dbError, { route: "GET /api/user" });
     return NextResponse.json({ message: "Server error" }, { status: 500 });
   }
 }
@@ -95,6 +97,7 @@ export async function PUT(req) {
         return NextResponse.json(updatedUser, { status: 200 });
     } catch (dbError) {
         console.error("PUT /api/user error:", dbError.message);
+        logServerError("PUT /api/user error", dbError, { route: "PUT /api/user" });
         return NextResponse.json({ message: "Server error" }, { status: 500 });
     }
 }

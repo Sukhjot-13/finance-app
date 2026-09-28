@@ -5,6 +5,7 @@ import Category from "@/models/category.model";
 import { verifySession } from "@/lib/auth";
 import { defaultExpenseCategories, defaultIncomeCategories } from "@/lib/constants";
 import { isReservedCategoryName, RESERVED_CATEGORY_NAMES } from "@/lib/money";
+import { logServerError } from "@/lib/manager";
 
 // GET all categories for the user (defaults + custom)
 export async function GET(request) {
@@ -107,6 +108,7 @@ export async function POST(request) {
     // Infrastructure failures are 500s (retryable) — never 400s, which would
     // mislead clients into thinking their input was wrong.
     console.error("Create category error:", error.message);
+    logServerError("Create category error", error, { route: "POST /api/categories" });
     return NextResponse.json(
       { message: "Error creating category" },
       { status: 500 }

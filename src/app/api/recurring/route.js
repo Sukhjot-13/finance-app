@@ -5,6 +5,7 @@ import { verifySession } from "@/lib/auth";
 import { firstRunDate } from "@/lib/recurring";
 import { sendError, sendSuccess } from "@/lib/server-utils";
 import { coerceAmount, toMinorUnits } from "@/lib/money";
+import { logServerError } from "@/lib/manager";
 
 function validateRuleBody(body) {
   const { type, amount, category, frequency, dayOfMonth, dayOfWeek } = body || {};
@@ -52,6 +53,7 @@ export async function GET() {
     return sendSuccess({ rules });
   } catch (error) {
     console.error("GET /api/recurring error:", error.message);
+    logServerError("GET /api/recurring error", error, { route: "GET /api/recurring" });
     return sendError("Failed to fetch recurring rules.", 500);
   }
 }
@@ -98,6 +100,7 @@ export async function POST(req) {
     return sendSuccess({ rule }, 201);
   } catch (error) {
     console.error("POST /api/recurring error:", error.message);
+    logServerError("POST /api/recurring error", error, { route: "POST /api/recurring" });
     return sendError("Failed to create recurring rule.", 500);
   }
 }

@@ -11,6 +11,7 @@ import {
   popLastHit,
   getClientIp,
 } from "@/lib/rate-limit";
+import { logServerError } from "@/lib/manager";
 
 // Sliding-window limits backed by MongoDB (shared across instances).
 const EMAIL_WINDOW_MS = 60 * 60 * 1000; // 1 hour
@@ -145,6 +146,7 @@ export async function POST(request) {
         await user.save();
       } catch (restoreError) {
         console.error("OTP restore after failed send error:", restoreError.message);
+        logServerError("OTP restore after failed send error", restoreError, { route: "POST /api/auth/otp/send" });
       }
       popLastHit(emailKey).catch(() => {});
       popLastHit(ipKey).catch(() => {});
@@ -166,6 +168,7 @@ export async function POST(request) {
       `OTP send failed [requestId=${randomUUID()}]:`,
       typeof error?.message === "string" ? error.message : "unknown error"
     );
+    logServerError("OTP send failed", error, { route: "POST /api/auth/otp/send" });
 
     // Don't expose internal errors to the client (message can be undefined
     // for non-Error throws).

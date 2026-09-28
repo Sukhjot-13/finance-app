@@ -4,6 +4,7 @@ import Transaction from "@/models/transaction.model";
 import { verifySession } from "@/lib/auth";
 import { NextResponse } from "next/server";
 import { coerceAmount, toMinorUnits } from "@/lib/money";
+import { logServerError } from "@/lib/manager";
 
 // Escapes user input so it's always treated literally in $regex filters.
 function escapeRegex(value) {
@@ -95,6 +96,7 @@ export async function GET(req) {
     );
   } catch (error) {
     console.error("GET transactions error:", error?.message);
+    logServerError("GET transactions error", error, { route: "GET /api/transactions" });
     return NextResponse.json({ message: "Server error" }, { status: 500 });
   }
 }
@@ -203,6 +205,7 @@ export async function POST(req) {
     return NextResponse.json(transaction, { status: 201 });
   } catch (error) {
     console.error("POST transaction error:", error?.message);
+    logServerError("POST transaction error", error, { route: "POST /api/transactions" });
     
     if (error.name === 'ValidationError') {
       return NextResponse.json(

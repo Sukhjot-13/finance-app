@@ -21,6 +21,7 @@ import {
   purgeExpiredRefreshTokens,
   REFRESH_ROTATION_GRACE_MS,
 } from "@/lib/auth";
+import { logServerError, managerLog } from "@/lib/manager";
 
 export async function POST() {
   const cookieStore = await cookies();
@@ -37,6 +38,7 @@ export async function POST() {
     decoded = jwt.verify(rawToken, process.env.REFRESH_TOKEN_SECRET);
   } catch (error) {
     console.error("Refresh token verification failed:", error.message);
+    logServerError("Refresh token verification failed", error, { route: "POST /api/auth/refresh" });
     cookieStore.delete("refreshToken");
     cookieStore.delete("accessToken");
     return sendError("Session expired or invalid. Please log in again.", 401);
@@ -80,6 +82,10 @@ export async function POST() {
         "Refresh-token reuse detected — revoking all sessions for user",
         String(decoded.userId)
       );
+      managerLog("warn", "Refresh-token reuse detected — revoking all sessions for user", {
+        userId: String(decoded.userId),
+        route: "POST /api/auth/refresh",
+      });
       await User.updateOne(
         { _id: decoded.userId },
         { $set: { refreshTokens: [] } }
@@ -135,6 +141,10 @@ export async function POST() {
             "Refresh-token reuse detected — revoking all sessions for user",
             String(decoded.userId)
           );
+          managerLog("warn", "Refresh-token reuse detected — revoking all sessions for user", {
+            userId: String(decoded.userId),
+            route: "POST /api/auth/refresh",
+          });
           await User.updateOne(
             { _id: decoded.userId },
             { $set: { refreshTokens: [] } }
@@ -181,12 +191,14 @@ export async function POST() {
       await purgeExpiredRefreshTokens(user._id);
     } catch (pruneError) {
       console.error("Refresh-token prune failed:", pruneError.message);
+      logServerError("Refresh-token prune failed", pruneError, { route: "POST /api/auth/refresh" });
     }
 
     return sendSuccess({ message: "Access token refreshed successfully" });
   } catch (error) {
     // Transient infrastructure error — keep cookies so the client can retry.
     console.error("Token refresh failed:", error.message);
+    logServerError("Token refresh failed", error, { route: "POST /api/auth/refresh" });
     return sendError("Could not refresh session. Please try again.", 500);
   }
 }

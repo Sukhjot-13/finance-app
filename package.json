@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint .",
     "test": "vitest run",
+    "manager:check": "node scripts/check-manager-integration.mjs",
     "cap:sync": "cap sync ios",
     "cap:open": "cap open ios",
     "cap:run": "cap run ios"

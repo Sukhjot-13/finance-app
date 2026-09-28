@@ -5,6 +5,7 @@ import { verifySession } from "@/lib/auth";
 import mongoose from "mongoose";
 import { NextResponse } from "next/server";
 import { AMOUNT_MINOR_EXPR, fromMinorUnits } from "@/lib/money";
+import { logServerError } from "@/lib/manager";
 
 /** Minimum gap between recurring materialization passes, per user. */
 const RECURRING_THROTTLE_MS = 60 * 1000;
@@ -136,6 +137,7 @@ export async function GET(req) {
     );
   } catch (error) {
     console.error("Dashboard API Error:", error?.message);
+    logServerError("Dashboard API Error", error, { route: "GET /api/reports/dashboard" });
     return NextResponse.json({ message: "Server error" }, { status: 500 });
   }
 }

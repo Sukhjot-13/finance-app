@@ -12,6 +12,7 @@ import {
 import { cookies } from "next/headers";
 import dbConnect from "@/lib/mongodb";
 import { recordHitAndCount, resetKey, getClientIp } from "@/lib/rate-limit";
+import { logServerError } from "@/lib/manager";
 
 // Brute-force protection, backed by MongoDB so it is shared across
 // instances and survives restarts. 5 failed attempts per email inside a
@@ -130,6 +131,7 @@ export async function POST(req) {
       await materializeDueRules(user._id);
     } catch (error) {
       console.error("Recurring materialization on login failed:", error.message);
+      logServerError("Recurring materialization on login failed", error, { route: "POST /api/auth/otp/verify" });
     }
 
     // Set cookies. sameSite "lax" (not "strict"): strict cookies are NOT
@@ -174,6 +176,7 @@ export async function POST(req) {
       `OTP verify failed [requestId=${randomUUID()}]:`,
       typeof error?.message === "string" ? error.message : "unknown error"
     );
+    logServerError("OTP verify failed", error, { route: "POST /api/auth/otp/verify" });
     return sendError("An internal server error occurred.", 500);
   }
 }

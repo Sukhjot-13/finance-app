@@ -4,6 +4,7 @@ import dbConnect from "@/lib/mongodb";
 import Transaction from "@/models/transaction.model";
 import { verifySession } from "@/lib/auth";
 import { fromMinorUnits, minorOf } from "@/lib/money";
+import { logServerError } from "@/lib/manager";
 
 export async function POST(request) {
   const { user, status } = await verifySession();
@@ -134,6 +135,7 @@ export async function POST(request) {
     );
   } catch (error) {
     console.error("Generate report error:", error?.message);
+    logServerError("Generate report error", error, { route: "POST /api/reports/generate" });
     return NextResponse.json({ message: "Server error" }, { status: 500 });
   }
 }

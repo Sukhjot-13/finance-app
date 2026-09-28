@@ -10,6 +10,12 @@ import { jwtVerify } from "jose";
  * - style-src keeps 'unsafe-inline' because Framer Motion/Chart.js tuning
  *   relies on inline styling.
  * - Dev additionally allows 'unsafe-eval' for HMR/Turbopack.
+ * - connect-src gains the Manager origin when it is configured: the browser
+ *   logger and the analytics tracker both POST there, and 'self' alone would
+ *   silently block them. Unset => unchanged policy, so the integration stays a
+ *   no-op when it is not configured. The tracker <script> itself needs no
+ *   script-src change: 'strict-dynamic' already trusts a script inserted by a
+ *   nonce'd script.
  */
 function buildCsp(nonce) {
   const isDev = process.env.NODE_ENV === "development";
@@ -21,7 +27,7 @@ function buildCsp(nonce) {
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob:",
     "font-src 'self' data:",
-    "connect-src 'self'",
+    `connect-src 'self'${process.env.NEXT_PUBLIC_MANAGER_ENDPOINT ? ` ${process.env.NEXT_PUBLIC_MANAGER_ENDPOINT}` : ""}`,
     "object-src 'none'",
     "base-uri 'self'",
     "form-action 'self'",

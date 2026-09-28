@@ -88,6 +88,77 @@ JWT_SECRET="your_super_secret_JWT_token_string"
 
 ```
 
+A complete template (including the optional Manager block below) lives in
+[`.env.example`](.env.example).
+
+### Optional: Manager (centralized logging + analytics)
+
+FinTrack can send its server error logs and page analytics to **Manager**, a personal
+project control center. With no `MANAGER_*` variables set nothing changes: the
+integration is a set of no-ops, so local development, CI and previews are unaffected.
+
+| Variable | Required for | Value |
+|---|---|---|
+| `MANAGER_ENDPOINT` | logs + analytics | base URL of the Manager deployment |
+| `MANAGER_APP_ID` | logs + analytics | project slug in Manager |
+| `MANAGER_LOG_KEY` | server logs | `mlk_…` server key |
+| `MANAGER_ANALYTICS_KEY` | analytics | `mak_…` |
+| `MANAGER_LOG_SOURCE` | optional | `server` (default) or `client` |
+| `NEXT_PUBLIC_MANAGER_ENDPOINT` | browser logs + analytics | same value as `MANAGER_ENDPOINT` |
+| `NEXT_PUBLIC_MANAGER_APP_ID` | browser logs + analytics | same value as `MANAGER_APP_ID` |
+| `NEXT_PUBLIC_MANAGER_CLIENT_KEY` | browser logs | `mck_…` client key |
+| `NEXT_PUBLIC_MANAGER_ANALYTICS_KEY` | analytics | `mak_…` |
+
+**The `NEXT_PUBLIC_` block is required for the browser half, not optional.** Next.js
+only inlines `NEXT_PUBLIC_*` into the client bundle — `process.env` in browser code is
+an empty object, so reading the `MANAGER_*` values from a `"use client"` module always
+yields nothing and the browser logger never starts. Use the project's **client** key
+(`mck_…`) there: Manager derives each entry's `source` from the key kind.
+
+What gets wired up:
+
+- **Every server error path** in `src/app/api/**/route.js` already called
+  `console.error` (and the two refresh-token-reuse `console.warn`s); each now also
+  calls `logServerError` / `managerLog` from `src/lib/manager/index.js`, so the same
+  failures land in Manager. The `console.*` output is unchanged. This app has no
+  logger of its own, so `src/lib/manager/index.js` is the single entry point — no
+  app-wide logging layer was introduced.
+- **Unhandled crashes and rejections in the browser**, plus browser `console.warn` /
+  `console.error`, are captured by the SDK.
+- **Analytics**: one script tag is injected client-side, tracking pageviews (SPA routes
+  included), click targets, referrers and UTM params. `src/proxy.js` adds the Manager
+  origin to the CSP `connect-src` when `NEXT_PUBLIC_MANAGER_ENDPOINT` is set, otherwise
+  the strict policy would silently block the tracker and the browser logger.
+
+Refresh the vendored SDK (one file, zero dependencies):
+
+```bash
+curl -fsSL -H "x-manager-key: $MANAGER_LOG_KEY" \
+  "http://127.0.0.1:3300/api/sdk/logger?format=js" -o src/lib/manager/logger.js
+```
+
+Verify the wiring against a running Manager:
+
+```bash
+npm run manager:check   # needs MANAGER_ENDPOINT, MANAGER_LOG_KEY, MANAGER_ANALYTICS_KEY
+```
+
+It posts one log and one event through the real endpoints, asserts the right key kinds
+are accepted and the wrong ones are refused, then hits this app's own
+`POST /api/auth/refresh` error path.
+
+Notes:
+
+- On the iOS (Capacitor) build, `NEXT_PUBLIC_MANAGER_ENDPOINT` must be a host the phone
+  can actually reach — `127.0.0.1` on a device is the device itself, not your machine.
+- Server logs flush on every write, not on the SDK's 5-second timer: serverless
+  runtimes can freeze timers after a response is sent, which would silently drop
+  entries.
+- Process-level `uncaughtException` capture is intentionally **off**; Next.js owns
+  process error handling. Report errors from your error boundary instead.
+- The integration never throws into a request: if Manager is unreachable, the app
+  behaves as if logging were disabled.
+
 ---
 
 ## ⚙️ API Endpoints

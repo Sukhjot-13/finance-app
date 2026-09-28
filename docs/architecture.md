@@ -391,6 +391,17 @@ Define all of these in a `.env.local` file at the project root.
 | `JWT_SECRET` | Reserved/unused — no `src/` references (grep 2026-09-26); kept in README template only | — |
 | `NODE_ENV` | Environment mode (`development` adds `'unsafe-eval'` to CSP script-src; controls cookie `secure` flags; `SimpleChart` dev-only error detail) | `src/proxy.js`, auth routes (`refresh`, `otp/verify`), `src/components/SimpleChart.js` |
 | `CAPACITOR_SERVER_URL` | (Optional) Overrides the target URL loaded by the iOS app (defaults to `https://fintrack.vistaenvision.com`) | `capacitor.config.ts` |
+| `MANAGER_ENDPOINT` | (Optional) Base URL of the Manager deployment. All three of endpoint + app id + log key are required before the integration enables itself. | `src/lib/manager/index.js` → `managerConfig` |
+| `MANAGER_APP_ID` | (Optional) Project slug in Manager (`finance-app`). | `src/lib/manager/index.js` → `managerConfig` |
+| `MANAGER_LOG_KEY` | (Optional) Project **server** log key (`mlk_…`). | `src/lib/manager/index.js` → `managerConfig` |
+| `MANAGER_ANALYTICS_KEY` | (Optional) Analytics key (`mak_…`) for the injected tracker `<script>`. | `src/lib/manager/index.js` → `managerConfig` |
+| `MANAGER_LOG_SOURCE` | (Optional) `server` (default) or `client`. Inferred when omitted. | `src/lib/manager/index.js` → `managerConfig.source` |
+| `NEXT_PUBLIC_MANAGER_ENDPOINT` | (Optional, browser) Same value as `MANAGER_ENDPOINT`. **Required for the browser half** — Next.js only inlines `NEXT_PUBLIC_*` into the client bundle, so `process.env.MANAGER_*` is always empty in browser code. Also appended to the page CSP `connect-src`. | `src/lib/manager/index.js` → `managerClientConfig`; `src/proxy.js` → `buildCsp` |
+| `NEXT_PUBLIC_MANAGER_APP_ID` | (Optional, browser) Same value as `MANAGER_APP_ID`. Same client-bundle constraint. | `src/lib/manager/index.js` → `managerClientConfig` |
+| `NEXT_PUBLIC_MANAGER_CLIENT_KEY` | (Optional, browser) Project **client** log key (`mck_…`). Manager derives each entry's `source` from the key kind, so browser entries must carry the client key. | `src/lib/manager/index.js` → `managerClientConfig` |
+| `NEXT_PUBLIC_MANAGER_ANALYTICS_KEY` | (Optional, browser) Analytics key (`mak_…`) for the injected tracker `<script>`. | `src/lib/manager/index.js` → `managerTrackerScript` |
+| `VERCEL_GIT_COMMIT_SHA` / `GIT_SHA` | (Optional) Manager `release` label on the server; falls back to `'dev'`. | `src/lib/manager/index.js` → `startManagerLogger` |
+| `NEXT_PUBLIC_RELEASE` | (Optional) Manager `release` label in the browser; falls back to `'web'`. | `src/lib/manager/ManagerProvider.jsx` |
 
 ### Generating JWT Secrets
 ```bash
@@ -409,6 +420,58 @@ Run 3 times — one for each of `ACCESS_TOKEN_SECRET`, `REFRESH_TOKEN_SECRET`, a
 
 ### Tests
 ```bash
-npm test        # vitest — runs ALL 223 tests in one go via test/run-all.test.js
-npm run lint    # eslint . (clean)
+npm test           # vitest — runs ALL 338 tests in one go via test/run-all.test.js
+npm run lint       # eslint . (clean)
+npm run manager:check  # live check against a running Manager (needs MANAGER_* env)
 ```
+
+---
+
+## Manager integration (added 2026-09-28)
+
+Optional centralized logging + analytics. With no `MANAGER_*` variables every export in
+`src/lib/manager/index.js` degrades to a no-op, so local dev, CI and previews are
+unaffected. This app has **no logger of its own** — unlike ResumeBuilder, which bridged
+an existing `src/lib/logger.js` — so `src/lib/manager/index.js` is the single entry
+point and the existing `console.error` / `console.warn` calls in the API routes fan out
+to it. No app-wide logging layer was invented, and no `console.*` output was changed.
+
+| File | Purpose | Exports |
+|---|---|---|
+| `src/lib/manager/logger.js` | The vendored `@manager/logger` SDK: single file, zero dependencies, refreshed with `curl -H "x-manager-key: …" "…/api/sdk/logger?format=js"` | `initLogger`, `traceIdFromHeaders`, `shutdownLoggers`, `fingerprint`, `LOG_SDK_VERSION`, `LOG_SDK_PATH`, `TRACE_HEADER` |
+| `src/lib/manager/index.js` | Integration facade. Reads the server `MANAGER_*` env, exposes a no-op logger when unconfigured, creates the real logger lazily on first use and caches it on `globalThis` so every module instance shares one queue, and flushes on every write (serverless can freeze timers). Separately exposes `managerClientConfig`, built from the `NEXT_PUBLIC_MANAGER_*` block, because Next.js strips non-public env from the client bundle. Never throws. | `managerConfig`, `managerClientConfig`, `startManagerLogger`, `getManagerLogger`, `managerLog`, `logServerEvent`, `logServerError`, `managerTrackerScript` |
+| `src/lib/manager/ManagerProvider.jsx` | Client component mounted in `src/app/layout.js`: starts the browser logger and injects the analytics `<script>` once, guarded against double injection. Gated on `managerClientConfig.enabled`, not `managerConfig.enabled`. | `ManagerProvider` (default) |
+| `src/proxy.js` (modified) | `buildCsp` appends `NEXT_PUBLIC_MANAGER_ENDPOINT` to `connect-src` when set. Unset ⇒ byte-identical policy. | `buildCsp`, `proxy` |
+| `src/app/api/**/route.js` (17 files, 39 sites) | Each existing `console.error` / `console.warn` in an API error path is followed by `logServerError(...)` / `managerLog("warn", ...)` carrying the same message plus a `route` tag. Additive only. | — |
+| `scripts/check-manager-integration.mjs` | `npm run manager:check` — live check against a running Manager (key kinds, rejection paths, this app's own refresh error path) | — |
+| `test/suites/manager-integration.suite.js` | 13 tests: disabled-when-unconfigured no-ops, enablement rules, blank values, server/client config split, tracker tag construction, flush-on-write, unknown-level fallback, shared `globalThis` instance, real SDK surface. Registered in `test/run-all.test.js`, the repo's single test entry point. | — |
+
+### Design notes
+
+- The server logger is created **on first use**, not in an `instrumentation` hook. This
+  app has no `instrumentation.js` and none was added: Next.js compiles startup hooks and
+  route handlers into separate module graphs, so a boot-created instance would not be
+  the object a request sees.
+- `captureProcessErrors` is intentionally **off** — Next.js owns process error handling
+  and extra process listeners stop delivery.
+- Server logs flush on every write instead of relying on the SDK's 5s timer: a
+  serverless runtime can freeze timers once the response is sent, silently dropping
+  the batch.
+- Coverage is the server API error paths. Client-side `console.error` in components and
+  pages is not fanned out server-side — the browser SDK captures it instead via
+  `captureConsole`.
+- **Deviation from the ResumeBuilder reference:** the reference reads `MANAGER_ENDPOINT` /
+  `MANAGER_APP_ID` / `MANAGER_LOG_KEY` from inside a `"use client"` module. Next.js
+  replaces `process.env` in browser code with an empty object, so all three resolve to
+  `undefined`, `managerConfig.enabled` is `false`, and `ManagerProvider` returns before
+  doing anything — the browser logger and analytics are dead code. Worse, adding a
+  `NEXT_PUBLIC_` block is not sufficient on its own: Next.js inlines only *statically
+  written* `process.env.NEXT_PUBLIC_FOO` member expressions, so the reference's dynamic
+  `env(name)` helper compiles to a runtime index into that same empty object and is
+  equally dead. This repo therefore splits the config (`managerConfig` for the server,
+  `managerClientConfig` for the browser) and reads every client value with a static
+  member expression.
+- **Deviation:** `src/proxy.js` `connect-src` gains the Manager origin. This app emits
+  a strict nonce + `strict-dynamic` CSP where `connect-src` is `'self'`, so the browser
+  logger and the tracker would be silently blocked. `script-src` needs no change —
+  `strict-dynamic` already trusts a `<script>` inserted by a nonce'd script.

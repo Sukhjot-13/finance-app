@@ -4,6 +4,7 @@ import { sendSuccess } from "@/lib/server-utils";
 import { verifyToken, hashToken } from "@/lib/auth";
 import User from "@/models/user.model";
 import dbConnect from "@/lib/mongodb";
+import { logServerError } from "@/lib/manager";
 
 export async function POST(req) {
   const cookieStore = await cookies();
@@ -37,6 +38,7 @@ export async function POST(req) {
     // explicit `revoked: false` + machine-readable code: this device is out,
     // but the server-side session may still be live on OTHER devices.
     console.error("Logout error:", error?.message);
+    logServerError("Logout error", error, { route: "POST /api/auth/logout" });
     cookieStore.delete("accessToken");
     cookieStore.delete("refreshToken");
     return sendSuccess({

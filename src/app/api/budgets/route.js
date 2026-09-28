@@ -4,6 +4,7 @@ import Budget from "@/models/budget.model";
 import { verifySession } from "@/lib/auth";
 import { isValidMonthKey, utcMonthKey } from "@/lib/utils";
 import { MAX_AMOUNT, toMinorUnits } from "@/lib/money";
+import { logServerError } from "@/lib/manager";
 
 // Budgets are whole-unit caps (min 1), unlike transaction amounts.
 function coerceBudgetAmount(value) {
@@ -31,6 +32,7 @@ export async function GET(req) {
     return NextResponse.json(budgets, { status: 200 });
   } catch (error) {
     console.error("GET budgets error:", error?.message);
+    logServerError("GET budgets error", error, { route: "GET /api/budgets" });
     return NextResponse.json({ message: "Server error" }, { status: 500 });
   }
 }
@@ -96,6 +98,7 @@ export async function POST(req) {
     return NextResponse.json(budget, { status: 200 });
   } catch (error) {
     console.error("POST budget error:", error?.message);
+    logServerError("POST budget error", error, { route: "POST /api/budgets" });
 
     if (error.code === 11000) {
       return NextResponse.json(
@@ -162,6 +165,7 @@ export async function DELETE(req) {
     );
   } catch (error) {
     console.error("DELETE budget error:", error?.message);
+    logServerError("DELETE budget error", error, { route: "DELETE /api/budgets" });
     return NextResponse.json(
       { message: "Error deleting budget" },
       { status: 500 }

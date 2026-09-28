@@ -5,6 +5,7 @@ import Recurring from "@/models/recurring.model";
 import { verifySession } from "@/lib/auth";
 import { sendError, sendSuccess } from "@/lib/server-utils";
 import { coerceAmount, toMinorUnits } from "@/lib/money";
+import { logServerError } from "@/lib/manager";
 
 async function findOwnedRule(id, userId) {
   if (!mongoose.Types.ObjectId.isValid(id)) return null;
@@ -62,6 +63,7 @@ export async function PATCH(req, { params }) {
     return sendSuccess({ rule });
   } catch (error) {
     console.error("PATCH /api/recurring/[id] error:", error.message);
+    logServerError("PATCH /api/recurring/[id] error", error, { route: "PATCH /api/recurring/[id]" });
     return sendError("Failed to update recurring rule.", 500);
   }
 }
@@ -83,6 +85,7 @@ export async function DELETE(_req, { params }) {
     return sendSuccess({ deleted: true });
   } catch (error) {
     console.error("DELETE /api/recurring/[id] error:", error.message);
+    logServerError("DELETE /api/recurring/[id] error", error, { route: "DELETE /api/recurring/[id]" });
     return sendError("Failed to delete recurring rule.", 500);
   }
 }

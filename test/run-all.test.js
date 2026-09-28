@@ -113,6 +113,7 @@ await Promise.all([
   import("./suites/api-client.suite.js"),
   import("./suites/server-utils.suite.js"),
   import("./suites/rate-limit.suite.js"),
+  import("./suites/manager-integration.suite.js"),
   import("./suites/dialog-a11y.suite.jsx"),
   import("./suites/proxy.suite.js"),
   import("./suites/models.suite.js"),

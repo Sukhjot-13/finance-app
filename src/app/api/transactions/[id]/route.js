@@ -5,6 +5,7 @@ import { verifySession } from "@/lib/auth"; // Using the secure session verifier
 import { sendError, sendSuccess } from "@/lib/server-utils";
 import mongoose from "mongoose";
 import { coerceAmount, toMinorUnits } from "@/lib/money";
+import { logServerError } from "@/lib/manager";
 
 /**
  * GET a single transaction by its ID.
@@ -33,6 +34,7 @@ export async function GET(request, { params }) {
     return sendSuccess(transaction);
   } catch (err) {
     console.error("GET /api/transactions/[id] error:", err?.message);
+    logServerError("GET /api/transactions/[id] error", err, { route: "GET /api/transactions/[id]" });
     return sendError("Server error", 500);
   }
 }
@@ -141,6 +143,7 @@ export async function PUT(request, { params }) {
     return sendSuccess(updatedTransaction);
   } catch (err) {
     console.error("PUT /api/transactions/[id] error:", err?.message);
+    logServerError("PUT /api/transactions/[id] error", err, { route: "PUT /api/transactions/[id]" });
     if (err.name === "ValidationError") {
       return sendError(err.message, 400);
     }
@@ -176,6 +179,7 @@ export async function DELETE(request, { params }) {
     return sendSuccess({ message: "Transaction deleted successfully" });
   } catch (err) {
     console.error("DELETE /api/transactions/[id] error:", err?.message);
+    logServerError("DELETE /api/transactions/[id] error", err, { route: "DELETE /api/transactions/[id]" });
     return sendError("Server error", 500);
   }
 }

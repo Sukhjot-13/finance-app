@@ -7,6 +7,7 @@ import Budget from "@/models/budget.model";
 import { verifySession } from "@/lib/auth";
 import { isReservedCategoryName } from "@/lib/money";
 import mongoose from "mongoose";
+import { logServerError } from "@/lib/manager";
 
 // PUT rename a custom category.
 // Renaming cascades: transactions AND monthly budgets are stored by plain
@@ -156,6 +157,7 @@ export async function PUT(request, { params }) {
           /transaction/i.test(msg) && /not (supported|enabled)/i.test(msg);
         if (!unsupported) {
           console.error("Category rename error:", txError.message);
+          logServerError("Category rename error", txError, { route: "PUT /api/categories/[id]" });
           return NextResponse.json(
             { message: "Error updating category" },
             { status: 500 }
@@ -195,6 +197,9 @@ export async function PUT(request, { params }) {
       // All best-effort: if even the rollback fails, surface the original
       // error — retrying the same rename is safe either way.
       console.error("Rename cascade failed, rolling back:", cascadeError.message);
+      logServerError("Rename cascade failed, rolling back", cascadeError, {
+        route: "PUT /api/categories/[id]",
+      });
       try {
         await Transaction.updateMany(
           { userId: user._id, category: newName },
@@ -202,6 +207,7 @@ export async function PUT(request, { params }) {
         );
       } catch (revertError) {
         console.error("Rename transaction-revert failed:", revertError.message);
+        logServerError("Rename transaction-revert failed", revertError, { route: "PUT /api/categories/[id]" });
       }
       try {
         await Budget.updateMany(
@@ -210,12 +216,14 @@ export async function PUT(request, { params }) {
         );
       } catch (revertError) {
         console.error("Rename budget-revert failed:", revertError.message);
+        logServerError("Rename budget-revert failed", revertError, { route: "PUT /api/categories/[id]" });
       }
       category.name = oldName;
       try {
         await category.save();
       } catch (rollbackError) {
         console.error("Rename rollback failed:", rollbackError.message);
+        logServerError("Rename rollback failed", rollbackError, { route: "PUT /api/categories/[id]" });
       }
       throw cascadeError;
     }
@@ -223,6 +231,7 @@ export async function PUT(request, { params }) {
     return NextResponse.json(category, { status: 200 });
   } catch (error) {
     console.error("Category rename error:", error.message);
+    logServerError("Category rename error", error, { route: "PUT /api/categories/[id]" });
     return NextResponse.json(
       { message: "Error updating category" },
       { status: 500 }
@@ -274,6 +283,9 @@ export async function DELETE(request, { params }) {
       await Budget.deleteMany({ userId: user._id, category: category.name });
     } catch (cascadeError) {
       console.error("Category delete cascade failed, restoring:", cascadeError.message);
+      logServerError("Category delete cascade failed, restoring", cascadeError, {
+        route: "DELETE /api/categories/[id]",
+      });
       try {
         const restore = new Category({
           _id: category._id,
@@ -284,6 +296,7 @@ export async function DELETE(request, { params }) {
         await restore.save();
       } catch (restoreError) {
         console.error("Category delete-restore failed:", restoreError.message);
+        logServerError("Category delete-restore failed", restoreError, { route: "DELETE /api/categories/[id]" });
       }
       throw cascadeError;
     }
@@ -294,6 +307,7 @@ export async function DELETE(request, { params }) {
     );
   } catch (error) {
     console.error("Category delete error:", error.message);
+    logServerError("Category delete error", error, { route: "DELETE /api/categories/[id]" });
     return NextResponse.json(
       { message: "Error deleting category" },
       { status: 500 }

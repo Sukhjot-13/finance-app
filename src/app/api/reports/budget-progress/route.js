@@ -6,6 +6,7 @@ import mongoose from "mongoose";
 import { NextResponse } from "next/server";
 import { isValidMonthKey, utcMonthKey } from "@/lib/utils";
 import { AMOUNT_MINOR_EXPR, fromMinorUnits, toMinorUnits } from "@/lib/money";
+import { logServerError } from "@/lib/manager";
 
 const OVERALL_CATEGORY = "__total__";
 
@@ -170,6 +171,7 @@ export async function GET(req) {
     return NextResponse.json({ overall, progress, totalSpent, excludedSpent }, { status: 200 });
   } catch (error) {
     console.error("Budget progress API Error:", error?.message);
+    logServerError("Budget progress API Error", error, { route: "GET /api/reports/budget-progress" });
     return NextResponse.json({ message: "Server error" }, { status: 500 });
   }
 }
