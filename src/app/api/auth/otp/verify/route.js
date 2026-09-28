@@ -1,4 +1,5 @@
 // src/app/api/auth/otp/verify/route.js
+import { randomUUID } from "crypto";
 import bcrypt from "bcryptjs";
 import User from "@/models/user.model";
 import { sendError, sendSuccess } from "@/lib/server-utils";
@@ -167,7 +168,12 @@ export async function POST(req) {
       },
     });
   } catch (error) {
-    console.error(error);
+    // Message + request id only. This handler sees OTP-related failures and
+    // the raw object can carry request payload material in SDK errors.
+    console.error(
+      `OTP verify failed [requestId=${randomUUID()}]:`,
+      typeof error?.message === "string" ? error.message : "unknown error"
+    );
     return sendError("An internal server error occurred.", 500);
   }
 }

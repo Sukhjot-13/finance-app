@@ -185,6 +185,7 @@ describe("EditTransactionModal", () => {
     expect(Object.keys(captured).sort()).toEqual([
       "amount",
       "category",
+      "currency",
       "date",
       "description",
       "excludeFromBudget",

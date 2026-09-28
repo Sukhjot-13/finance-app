@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import dbConnect from "@/lib/mongodb";
 import Transaction from "@/models/transaction.model";
 import { verifySession } from "@/lib/auth";
+import { fromMinorUnits, minorOf } from "@/lib/money";
 
 export async function POST(request) {
   const { user, status } = await verifySession();
@@ -13,6 +14,11 @@ export async function POST(request) {
   try {
     body = await request.json();
   } catch {
+    return NextResponse.json({ message: "Invalid request body" }, { status: 400 });
+  }
+  // A literal `null` body parses to null WITHOUT throwing, so the
+  // destructuring below would raise a TypeError and become a 500.
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
     return NextResponse.json({ message: "Invalid request body" }, { status: 400 });
   }
 
@@ -81,36 +87,41 @@ export async function POST(request) {
       date: { $gte: rangeStart, $lte: rangeEnd },
     });
     const transactions = await (typeof query.lean === "function"
-      ? query.select("type amount category date").lean()
+      ? query.select("type amount amountMinor category date").lean()
       : query);
 
-    const totalIncome = transactions
+    // EVERY sum runs over integer minor units and is converted to a decimal
+    // exactly once at the end. Summing the raw doubles produced payloads
+    // like 1234.5600000000002.
+    const incomeMinor = (transactions || [])
       .filter((t) => t.type === "income")
-      .reduce((sum, t) => sum + t.amount, 0);
-    const totalExpenses = transactions
+      .reduce((sum, t) => sum + minorOf(t), 0);
+    const expensesMinor = (transactions || [])
       .filter((t) => t.type === "expense")
-      .reduce((sum, t) => sum + t.amount, 0);
-    const netSavings = totalIncome - totalExpenses;
+      .reduce((sum, t) => sum + minorOf(t), 0);
 
-    const expenseBreakdown = transactions
-      .filter((t) => t.type === "expense")
-      .reduce((acc, t) => {
-        acc[t.category] = (acc[t.category] || 0) + t.amount;
-        return acc;
-      }, {});
+    const totalIncome = fromMinorUnits(incomeMinor);
+    const totalExpenses = fromMinorUnits(expensesMinor);
+    const netSavings = fromMinorUnits(incomeMinor - expensesMinor);
 
-    const incomeBreakdown = transactions
-      .filter((t) => t.type === "income")
-      .reduce((acc, t) => {
-        acc[t.category] = (acc[t.category] || 0) + t.amount;
-        return acc;
-      }, {});
+    // Object.create(null): a category named "__proto__" would otherwise be
+    // a silent no-op on a plain `{}` (its spending would vanish from the
+    // report entirely) and "constructor" would read back the Object
+    // constructor.
+    const expenseMinorMap = Object.create(null);
+    const incomeMinorMap = Object.create(null);
+    for (const t of transactions || []) {
+      const map = t.type === "expense" ? expenseMinorMap : t.type === "income" ? incomeMinorMap : null;
+      if (!map) continue;
+      const minor = minorOf(t);
+      map[t.category] = (Object.hasOwn(map, t.category) ? map[t.category] : 0) + minor;
+    }
 
-    const expenseBreakdownArray = Object.entries(expenseBreakdown)
-      .map(([category, total]) => ({ category, total }))
+    const expenseBreakdownArray = Object.entries(expenseMinorMap)
+      .map(([category, totalMinor]) => ({ category, total: fromMinorUnits(totalMinor) }))
       .sort((a, b) => b.total - a.total);
-    const incomeBreakdownArray = Object.entries(incomeBreakdown)
-      .map(([source, total]) => ({ source, total }))
+    const incomeBreakdownArray = Object.entries(incomeMinorMap)
+      .map(([source, totalMinor]) => ({ source, total: fromMinorUnits(totalMinor) }))
       .sort((a, b) => b.total - a.total);
 
     return NextResponse.json(
@@ -122,7 +133,7 @@ export async function POST(request) {
       { status: 200 }
     );
   } catch (error) {
-    console.error("Generate report error:", error);
+    console.error("Generate report error:", error?.message);
     return NextResponse.json({ message: "Server error" }, { status: 500 });
   }
 }

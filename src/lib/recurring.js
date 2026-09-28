@@ -1,24 +1,38 @@
 // FILE: finance-app/src/lib/recurring.js
-// Recurring-transaction engine (check-on-login pattern — no cron needed).
+// Recurring-transaction engine (check-on-use pattern — no cron needed).
 //
-// Rules materialize into Transaction documents when the user logs in (see the
-// OTP verify route). advanceRuleDate is pure and unit-tested; materializeDueRules
-// takes injectable models so tests never touch MongoDB.
+// Rules materialize into Transaction documents when the user is logged in and
+// uses the app (see api/auth/otp/verify and api/reports/dashboard).
+// advanceRuleDate is pure and unit-tested; materializeDueRules takes injectable
+// models so tests never touch MongoDB.
+//
+// IDEMPOTENCY: every occurrence is claimed by an ATOMIC conditional update
+// (findOneAndUpdate guarded on the exact `nextRunAt` the caller read) BEFORE
+// any insert. Two concurrent callers therefore cannot both materialize the
+// same occurrence: the second one's guard no longer matches and it skips. The
+// unique sparse index on (recurringRuleId, scheduledFor) is the second line of
+// defence — a duplicate-key error is treated as "already materialized".
+import { toMinorUnits } from "@/lib/money";
 
-/** Max catch-up occurrences per rule per login (bounds long absences). */
+/** Max catch-up occurrences per rule per pass (bounds long absences). */
 export const MAX_CATCH_UP_RUNS = 12;
 
 /**
  * Advance a run date by one frequency step. Monthly rules stay on the same
  * day-of-month (dayOfMonth is capped at 28 so every month has it); weekly
  * rules advance exactly 7 days.
+ *
+ * UTC-only, matching firstRunDate(). The previous local `setDate`/`setMonth`
+ * resolved to the wrong day-of-month on any server whose timezone is not UTC,
+ * and because the advanced value is written back as the new nextRunAt the
+ * error became permanent.
  */
 export function advanceRuleDate(date, frequency) {
   const next = new Date(date.getTime());
   if (frequency === "weekly") {
-    next.setDate(next.getDate() + 7);
+    next.setUTCDate(next.getUTCDate() + 7);
   } else {
-    next.setMonth(next.getMonth() + 1);
+    next.setUTCMonth(next.getUTCMonth() + 1);
   }
   return next;
 }
@@ -48,6 +62,12 @@ export function firstRunDate({ frequency, dayOfMonth, dayOfWeek }, from = new Da
 /**
  * Materialize every due occurrence of the user's active rules into
  * Transactions, advancing each rule's nextRunAt past now.
+ *
+ * Concurrency-safe: the nextRunAt advance is an atomic claim taken BEFORE
+ * inserting, so a second concurrent pass finds its guard stale and inserts
+ * nothing. A duplicate-key (E11000) insert rejection is likewise treated as
+ * "already materialized" rather than an error.
+ *
  * @returns number of transactions created.
  */
 export async function materializeDueRules(userId, deps = {}) {
@@ -70,29 +90,60 @@ export async function materializeDueRules(userId, deps = {}) {
 
   let created = 0;
   for (const rule of rules || []) {
-    let runAt = new Date(rule.nextRunAt);
-    let runs = 0;
-    while (runAt <= now && runs < MAX_CATCH_UP_RUNS) {
-      await new TransactionModel({
-        userId: rule.userId,
-        type: rule.type,
-        amount: rule.amount,
-        category: rule.category,
-        description: rule.description || `Recurring: ${rule.category}`,
-        date: runAt,
-      }).save();
-      created += 1;
-      runs += 1;
-      rule.lastRunAt = runAt;
-      runAt = advanceRuleDate(runAt, rule.frequency);
+    // Plan the whole run first so the claim can be a SINGLE $set of the
+    // final nextRunAt. Nothing is lost if the claim fails: the plan is
+    // recomputed from the same inputs on the next pass.
+    const runAts = [];
+    let cursor = new Date(rule.nextRunAt);
+    let planned = 0;
+    while (cursor <= now && planned < MAX_CATCH_UP_RUNS) {
+      runAts.push(cursor);
+      cursor = advanceRuleDate(cursor, rule.frequency);
+      planned += 1;
     }
-    // Always advance past now so a capped rule doesn't re-fire every login.
-    while (runAt <= now) {
-      runAt = advanceRuleDate(runAt, rule.frequency);
+    // Always advance past now so a capped rule doesn't re-fire every pass.
+    while (cursor <= now) {
+      cursor = advanceRuleDate(cursor, rule.frequency);
     }
+    const precomputedNext = cursor;
+    if (runAts.length === 0) continue;
+
+    // ATOMIC CLAIM. The filter pins the exact nextRunAt this caller read, so
+    // a concurrent pass that already advanced the rule makes this match
+    // nothing and we skip the inserts entirely.
+    const claimed = await RecurringModel.findOneAndUpdate(
+      { _id: rule._id, nextRunAt: rule.nextRunAt },
+      { $set: { nextRunAt: precomputedNext } },
+      { new: true }
+    );
+    if (!claimed) continue;
+
+    for (const runAt of runAts) {
+      try {
+        await new TransactionModel({
+          userId: rule.userId,
+          type: rule.type,
+          amount: rule.amount,
+          amountMinor: toMinorUnits(rule.amount),
+          currency: rule.currency || "USD",
+          category: rule.category,
+          description: rule.description || `Recurring: ${rule.category}`,
+          date: runAt,
+          recurringRuleId: rule._id,
+          scheduledFor: runAt,
+        }).save();
+        created += 1;
+      } catch (error) {
+        // The unique (recurringRuleId, scheduledFor) index rejected a
+        // duplicate: this occurrence is already materialized. Not an error.
+        if (error && error.code === 11000) continue;
+        throw error;
+      }
+    }
+
     await RecurringModel.updateOne(
       { _id: rule._id },
-      { $set: { nextRunAt: runAt, lastRunAt: rule.lastRunAt || null } }
+      { $set: { lastRunAt: runAts[runAts.length - 1] } }
     );
   }
   return created;

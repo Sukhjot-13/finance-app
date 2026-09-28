@@ -114,7 +114,15 @@ describe("POST /api/budgets (M4 type guards)", () => {
     const [filter, update] =
       globalThis.__models.budget.findOneAndUpdate.mock.calls[0];
     expect(filter).toEqual({ userId: "64b64b64b64b64b64b64b64b", category: "Food", month: "2026-08" });
-    expect(update).toEqual({ amount: 50.25 });
+    expect(update).toEqual({ amount: 50.25, amountMinor: 5025 });
+  });
+
+  it("rejects non-finite and overflowing amounts", async () => {
+    for (const amount of ["Infinity", "-Infinity", "1e400", "NaN", 0.5]) {
+      const res = await post({ category: "Food", amount, month: "2026-08" });
+      expect(res.status).toBe(400);
+    }
+    expect(globalThis.__models.budget.findOneAndUpdate).not.toHaveBeenCalled();
   });
 
   it("maps duplicate-key errors to 409", async () => {

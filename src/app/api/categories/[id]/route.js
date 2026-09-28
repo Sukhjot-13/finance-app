@@ -5,6 +5,7 @@ import Category from "@/models/category.model";
 import Transaction from "@/models/transaction.model";
 import Budget from "@/models/budget.model";
 import { verifySession } from "@/lib/auth";
+import { isReservedCategoryName } from "@/lib/money";
 import mongoose from "mongoose";
 
 // PUT rename a custom category.
@@ -42,7 +43,14 @@ export async function PUT(request, { params }) {
         { status: 400 }
       );
     }
-    const { name } = body || {};
+    // A literal `null` body parses to null without throwing.
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+      return NextResponse.json(
+        { message: "Invalid request body" },
+        { status: 400 }
+      );
+    }
+    const { name } = body;
 
     if (!name || typeof name !== "string" || !name.trim()) {
       return NextResponse.json(
@@ -55,6 +63,14 @@ export async function PUT(request, { params }) {
     if (newName.length > 50) {
       return NextResponse.json(
         { message: "Category name cannot exceed 50 characters" },
+        { status: 400 }
+      );
+    }
+
+    // See src/lib/money.js: reserved names break the report spending maps.
+    if (isReservedCategoryName(newName)) {
+      return NextResponse.json(
+        { message: "That category name is reserved. Please choose another." },
         { status: 400 }
       );
     }

@@ -11,6 +11,7 @@ export default function LoginPage() {
   const [step, setStep] = useState(1); // 1 for email, 2 for OTP
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [warning, setWarning] = useState("");
   const [checkingSession, setCheckingSession] = useState(true);
   const [resendIn, setResendIn] = useState(0);
   const router = useRouter();
@@ -25,6 +26,22 @@ export default function LoginPage() {
     const timer = setInterval(() => setResendIn((s) => s - 1), 1000);
     return () => clearInterval(timer);
   }, [resendIn]);
+
+  // A logout whose SERVER-side revoke failed (but which did clear this
+  // device's cookie) stashes a warning here on its way to /login. Without it
+  // the user has no idea their other devices are still signed in.
+  useEffect(() => {
+    try {
+      const stored = window.sessionStorage.getItem("fintrack:logoutWarning");
+      if (stored) {
+        window.sessionStorage.removeItem("fintrack:logoutWarning");
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        setWarning(stored);
+      }
+    } catch {
+      // Storage unavailable — nothing to surface.
+    }
+  }, []);
 
   useEffect(() => {
     const checkSession = async () => {
@@ -161,6 +178,15 @@ export default function LoginPage() {
           {error && (
             <div className="text-xs text-center text-rose-300 bg-rose-500/10 border border-rose-500/20 p-3 rounded-xl font-medium">
               {error}
+            </div>
+          )}
+
+          {warning && (
+            <div
+              role="status"
+              className="text-xs text-center text-amber-200 bg-amber-500/10 border border-amber-500/20 p-3 rounded-xl font-medium"
+            >
+              {warning}
             </div>
           )}
 

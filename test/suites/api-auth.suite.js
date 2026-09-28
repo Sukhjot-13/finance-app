@@ -179,6 +179,43 @@ describe("POST /api/auth/otp/send", () => {
     );
     expect(pops).toHaveLength(2);
   });
+  it("never logs the raw Brevo error object (Axios carries config.data = the OTP)", async () => {
+    const doc = {
+      email: "leaky@example.com",
+      otp: "previous-hash",
+      otpExpires: new Date(Date.now() + 1000),
+      save: vi.fn(async function () {
+        return this;
+      }),
+    };
+    U().findOne.mockResolvedValueOnce(doc);
+    // An Axios-shaped error: config.data holds the serialized SendSmtpEmail,
+    // i.e. the live 6-digit code in BOTH htmlContent and textContent.
+    const leakyError = Object.assign(new Error("Request failed with status code 400"), {
+      config: { data: JSON.stringify({ htmlContent: "<b>123456</b>", textContent: "code 123456" }) },
+      response: { data: "quota exceeded" },
+    });
+    globalThis.__brevoClient.sendTransacEmail.mockRejectedValueOnce(leakyError);
+
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      await post({ email: "leaky@example.com" });
+      expect(spy).toHaveBeenCalled();
+      for (const call of spy.mock.calls) {
+        for (const arg of call) {
+          // Only strings (message + request id) may be logged — never an
+          // object that could carry config.data.
+          expect(typeof arg).toBe("string");
+          expect(arg).not.toContain("123456");
+          expect(arg).not.toContain("config");
+        }
+      }
+      // Correlation id is present.
+      expect(spy.mock.calls.flat().join(" ")).toMatch(/requestId=/);
+    } finally {
+      spy.mockRestore();
+    }
+  });
 });
 
 // ---------------------------------------------------------------- verify
@@ -511,7 +548,7 @@ describe("POST /api/auth/logout", () => {
     expect(store.delete).toHaveBeenCalledWith("refreshToken");
   });
 
-  it("is HONEST on DB failure (500) but still clears THIS device's cookies", async () => {
+  it("reports an honest PARTIAL logout (200 + revoked:false) on DB failure", async () => {
     const realAuth = await realAuthPromise;
     const raw = realAuth.generateRefreshToken("uid1");
     const { store } = installJar({ refreshToken: raw, accessToken: "acc" });
@@ -519,9 +556,26 @@ describe("POST /api/auth/logout", () => {
 
     const { POST } = await loadLogout();
     const res = await POST(new Request("http://localhost/api/auth/logout", { method: "POST" }));
-    expect(res.status).toBe(500);
+
+    // The device IS logged out (cookies cleared), so a 500 would contradict
+    // the client's own state. The revoke failure is carried in the body.
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.revoked).toBe(false);
+    expect(body.code).toBe("SERVER_REVOKE_FAILED");
     expect(store.delete).toHaveBeenCalledWith("accessToken");
     expect(store.delete).toHaveBeenCalledWith("refreshToken");
+  });
+
+  it("returns revoked:true on the happy path", async () => {
+    const realAuth = await realAuthPromise;
+    const raw = realAuth.generateRefreshToken("uid1");
+    installJar({ refreshToken: raw, accessToken: "acc" });
+
+    const { POST } = await loadLogout();
+    const res = await POST(new Request("http://localhost/api/auth/logout", { method: "POST" }));
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({ revoked: true });
   });
 
   it("works with no cookie at all", async () => {
@@ -557,7 +611,7 @@ describe("POST /api/auth/logout-all", () => {
     expect(update.$set.refreshTokens).toEqual([]);
   });
 
-  it("is HONEST on DB failure (500) but still logs THIS device out", async () => {
+  it("reports an honest PARTIAL logout-all (200 + revoked:false) on DB failure", async () => {
     const realAuth = await import("@/lib/auth");
     const raw = realAuth.generateRefreshToken("uid1");
     const { store } = installJar({ refreshToken: raw, accessToken: "a" });
@@ -566,8 +620,22 @@ describe("POST /api/auth/logout-all", () => {
     const { POST } = await loadLogoutAll();
     const res = await POST(new Request("http://localhost/api/auth/logout-all", { method: "POST" }));
 
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.revoked).toBe(false);
+    expect(body.code).toBe("SERVER_REVOKE_ALL_FAILED");
     expect(store.delete).toHaveBeenCalledWith("accessToken");
     expect(store.delete).toHaveBeenCalledWith("refreshToken");
+  });
+
+  it("returns revoked:true on the happy path", async () => {
+    const realAuth = await import("@/lib/auth");
+    const raw = realAuth.generateRefreshToken("uid1");
+    installJar({ refreshToken: raw, accessToken: "a" });
+
+    const { POST } = await loadLogoutAll();
+    const res = await POST(new Request("http://localhost/api/auth/logout-all", { method: "POST" }));
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({ revoked: true });
   });
 });

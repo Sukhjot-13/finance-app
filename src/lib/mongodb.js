@@ -37,7 +37,12 @@ async function dbConnect() {
       console.log("MongoDB connected successfully");
       return mongoose;
     }).catch((error) => {
-      console.error("MongoDB connection error:", error);
+      // Message only. Mongoose/server errors can echo the connection string
+      // (which embeds the Atlas password) in their properties.
+      console.error(
+        "MongoDB connection error:",
+        typeof error?.message === "string" ? error.message : "unknown error"
+      );
       cached.promise = null; // Reset promise on error
       throw error;
     });

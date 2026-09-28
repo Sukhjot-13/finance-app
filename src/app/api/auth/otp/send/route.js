@@ -1,7 +1,7 @@
 // FILE: src/app/api/auth/otp/send/route.js
 // Handles sending the One-Time Password via Brevo.
 
-import { randomInt } from "crypto";
+import { randomInt, randomUUID } from "crypto";
 import dbConnect from "@/lib/mongodb";
 import User from "@/models/user.model";
 import { NextResponse } from "next/server";
@@ -156,7 +156,16 @@ export async function POST(request) {
       { status: 200 }
     );
   } catch (error) {
-    console.error("OTP Send Error:", error);
+    // NEVER log the raw error object here. The Brevo SDK is Axios-based and
+    // Axios errors carry `config.data` — the serialized SendSmtpEmail holding
+    // the live 6-digit OTP in BOTH htmlContent and textContent. Logging the
+    // whole object pushed a working OTP into the log sink on every Brevo
+    // failure (quota, invalid sender, network blip). A request id gives
+    // correlation without the payload.
+    console.error(
+      `OTP send failed [requestId=${randomUUID()}]:`,
+      typeof error?.message === "string" ? error.message : "unknown error"
+    );
 
     // Don't expose internal errors to the client (message can be undefined
     // for non-Error throws).

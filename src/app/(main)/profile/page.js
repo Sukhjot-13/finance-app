@@ -93,11 +93,28 @@ export default function ProfilePage() {
       return;
     }
     setConfirmLogoutAll(false);
+    setStatus(null);
     try {
-      await api("/api/auth/logout-all", { method: "POST" });
+      // api() resolves on non-ok responses — the old code navigated to
+      // /login unconditionally and discarded the honest 500, so a failed
+      // revoke looked exactly like a successful one.
+      const res = await api("/api/auth/logout-all", { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data?.revoked === false) {
+        setStatus({
+          type: "error",
+          text:
+            data?.message ||
+            "Could not log out from all devices. Other devices may still be signed in.",
+        });
+        return;
+      }
       window.location.href = "/login";
     } catch (error) {
-      console.error("Failed to log out from all devices", error);
+      console.error(
+        "Failed to log out from all devices:",
+        error?.message
+      );
       setStatus({
         type: "error",
         text: "Could not log out from all devices. Please log in and try again.",

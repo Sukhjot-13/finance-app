@@ -183,8 +183,14 @@ export default function CategoriesPage() {
               <p className="w-full text-xs font-medium text-rose-400 bg-rose-500/10 border border-rose-500/20 p-2.5 rounded-xl">{error}</p>
             )}
             <div className="flex-1 min-w-[200px]">
-              <label className="block text-xs font-semibold text-zinc-400 uppercase tracking-wider font-mono mb-1.5">Name</label>
+              <label
+                htmlFor="new-category-name"
+                className="block text-xs font-semibold text-zinc-400 uppercase tracking-wider font-mono mb-1.5"
+              >
+                Name
+              </label>
               <input
+                id="new-category-name"
                 type="text"
                 value={newName}
                 onChange={(e) => setNewName(e.target.value)}
@@ -196,8 +202,14 @@ export default function CategoriesPage() {
               />
             </div>
             <div>
-              <label className="block text-xs font-semibold text-zinc-400 uppercase tracking-wider font-mono mb-1.5">Type</label>
+              <label
+                htmlFor="new-category-type"
+                className="block text-xs font-semibold text-zinc-400 uppercase tracking-wider font-mono mb-1.5"
+              >
+                Type
+              </label>
               <select
+                id="new-category-type"
                 value={newType}
                 onChange={(e) => setNewType(e.target.value)}
                 className="bg-zinc-900 border border-zinc-800 rounded-xl px-3.5 py-2 text-sm text-zinc-200 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/40 cursor-pointer"

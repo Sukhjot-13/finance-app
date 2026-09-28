@@ -5,7 +5,15 @@
 // suites reconfigure them per-test (identity stays constant).
 
 import { vi } from "vitest";
+import { Buffer } from "node:buffer";
 import { makeModelsRegistry } from "./mocks.js";
+
+// jsdom executes in a vm context whose typed-array intrinsics are NOT Node's,
+// while `TextEncoder` (provided by the Node side) returns Node-realm arrays.
+// `jose` guards its inputs with `instanceof Uint8Array`, so its HS256
+// verification threw "payload must be an instance of Uint8Array" in the
+// proxy tests. Align the ambient constructor with Node's so both sides agree.
+globalThis.Uint8Array = Object.getPrototypeOf(Buffer.prototype).constructor;
 
 globalThis.__models = makeModelsRegistry();
 

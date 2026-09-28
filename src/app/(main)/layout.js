@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import api from "@/lib/api";
+import { useDialogA11y } from "@/lib/useDialogA11y";
 
 // Export the context so other components can use it.
 // Shape: { user, setUser } — setUser lets pages (e.g. profile) update the
@@ -128,6 +129,13 @@ function DesktopSidebar() {
 function MobileDrawer({ isOpen, onClose }) {
   const touchStartX = useRef(null);
   const touchStartY = useRef(null);
+  const panelRef = useRef(null);
+
+  // Same shared dialog behavior as AddTransactionDrawer / EditTransactionModal
+  // / BudgetManager: Escape closes, focus moves in and returns, body scroll
+  // locks, Tab is trapped. Without it the primary mobile navigation had none
+  // of those.
+  useDialogA11y({ ref: panelRef, isOpen, onClose });
 
   const handleTouchStart = (e) => {
     touchStartX.current = e.touches[0].clientX;
@@ -163,6 +171,7 @@ function MobileDrawer({ isOpen, onClose }) {
       <AnimatePresence>
         {isOpen && (
           <motion.aside
+            ref={panelRef}
             initial={{ x: "-100%" }}
             animate={{ x: "0%" }}
             exit={{ x: "-100%" }}
@@ -177,6 +186,9 @@ function MobileDrawer({ isOpen, onClose }) {
             }}
             onTouchStart={handleTouchStart}
             onTouchEnd={handleTouchEnd}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Navigation"
             className="fixed inset-y-0 left-0 w-64 bg-zinc-900/95 border-r border-zinc-800/80 backdrop-blur-xl text-zinc-100 flex flex-col z-50 pt-safe pb-safe shadow-2xl touch-pan-y"
           >
             <SidebarContent onClose={onClose} isMobile={true} />
@@ -191,6 +203,8 @@ function ProfileDropdown() {
   const [isOpen, setIsOpen] = useState(false);
   // Two-step confirm so one stray click can't log the user out.
   const [confirmingLogout, setConfirmingLogout] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
+  const [logoutWarning, setLogoutWarning] = useState("");
   const { user } = useContext(UserContext);
   const router = useRouter();
   const menuRef = useRef(null);
@@ -219,13 +233,52 @@ function ProfileDropdown() {
     setIsOpen(false);
   };
 
-  const handleLogout = async () => {
+  // The server always clears this device's cookie, so navigation to /login is
+  // always correct. When the response says the SERVER revoke failed we stash
+  // a warning the login page renders — the previous code discarded the
+  // deliberate 500 entirely and the user never learned their other devices
+  // were still live.
+  const warnAfterLogout = (message) => {
     try {
-      await api("/api/auth/logout", { method: "POST" });
-    } catch (error) {
-      console.error("An error occurred during logout:", error);
-    } finally {
+      window.sessionStorage.setItem("fintrack:logoutWarning", message);
+    } catch {
+      // Storage unavailable — the message is best-effort context, not state.
+    }
+  };
+
+  const handleLogout = async () => {
+    setLoggingOut(true);
+    setLogoutWarning("");
+    try {
+      // api() only REJECTS on refresh failure; a non-ok response RESOLVES,
+      // so res.ok has to be checked or the failure is discarded entirely.
+      const res = await api("/api/auth/logout", { method: "POST" });
+      if (!res.ok) {
+        // We cannot claim the cookie was cleared, so we do NOT leave the
+        // protected shell pretending the user is signed out.
+        setLogoutWarning(
+          "Couldn't reach the server to log you out. Please check your connection and try again."
+        );
+        return;
+      }
+      const data = await res.json().catch(() => ({}));
+      if (data?.revoked === false) {
+        // The device IS out, but the server-side revoke failed: hand the
+        // warning to /login so the user learns other devices are still live.
+        warnAfterLogout(
+          data?.message ||
+            "Signed out on this device, but the server could not end your session. Other devices may still be signed in."
+        );
+      }
       router.push("/login");
+    } catch (error) {
+      // Transient (network / refresh) failure: nothing was logged out.
+      setLogoutWarning(
+        "Couldn't reach the server to log you out. Please check your connection and try again."
+      );
+      console.error("Logout request failed:", error?.message);
+    } finally {
+      setLoggingOut(false);
     }
   };
 
@@ -280,6 +333,14 @@ function ProfileDropdown() {
             </div>
 
             <div className="pt-1">
+              {logoutWarning && (
+                <p
+                  role="status"
+                  className="mb-2 p-2.5 text-[11px] font-medium text-amber-200 bg-amber-500/10 border border-amber-500/30 rounded-xl"
+                >
+                  {logoutWarning}
+                </p>
+              )}
               {confirmingLogout ? (
                 <div className="p-3 bg-zinc-950/80 rounded-xl border border-rose-500/20">
                   <p className="text-xs font-medium text-zinc-300 mb-2.5">
@@ -288,10 +349,11 @@ function ProfileDropdown() {
                   <div className="flex items-center gap-2">
                     <button
                       onClick={handleLogout}
-                      className="flex-1 text-xs font-semibold text-white bg-rose-600 hover:bg-rose-500 px-3 py-1.5 rounded-lg shadow-sm transition-colors"
+                      disabled={loggingOut}
+                      className="flex-1 text-xs font-semibold text-white bg-rose-600 hover:bg-rose-500 px-3 py-1.5 rounded-lg shadow-sm transition-colors disabled:opacity-50"
                       role="menuitem"
                     >
-                      Yes, log out
+                      {loggingOut ? "Logging out..." : "Yes, log out"}
                     </button>
                     <button
                       onClick={() => setConfirmingLogout(false)}

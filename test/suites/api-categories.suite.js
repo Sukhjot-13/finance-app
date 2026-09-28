@@ -91,6 +91,43 @@ describe("POST /api/categories", () => {
     });
   });
 
+  it("rejects RESERVED category names (prototype-pollution vector)", async () => {
+    // A category named `constructor` made the report routes read the Object
+    // constructor out of their spending map; `__proto__` silently DROPPED the
+    // category's spending from a financial report.
+    for (const name of [
+      "constructor",
+      "__proto__",
+      "prototype",
+      "toString",
+      "valueOf",
+      "hasOwnProperty",
+      "  constructor  ",
+    ]) {
+      const res = await post({ name, type: "expense" });
+      expect(res.status).toBe(400);
+      await expect(res.json()).resolves.toMatchObject({ message: /reserved/i });
+    }
+    expect(C().instanceSave).not.toHaveBeenCalled();
+  });
+
+  it("still accepts an ordinary name that merely contains a reserved word", async () => {
+    const res = await post({ name: "Constructor Tools", type: "expense" });
+    expect(res.status).toBe(201);
+  });
+
+  it("400s a literal null body", async () => {
+    const { POST } = await loadRoute();
+    const res = await POST(
+      new Request("http://localhost/api/categories", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "null",
+      })
+    );
+    expect(res.status).toBe(400);
+  });
+
   it("500s (not 400s) on infrastructure failure", async () => {
     C().instanceSave.mockRejectedValueOnce(new Error("db down"));
     const res = await post({ name: "Food", type: "expense" });
@@ -216,6 +253,34 @@ describe("PUT /api/categories/[id] — rename cascade (M3)", () => {
       );
       expect(res.status).toBe(400);
     }
+  });
+
+  it("rejects renaming TO a reserved name, before any cascade write", async () => {
+    C().findOne.mockResolvedValueOnce(makeCategory("OldName"));
+    const { PUT } = await loadIdRoute();
+    for (const name of ["constructor", "__proto__", "toString"]) {
+      C().findOne.mockResolvedValueOnce(makeCategory("OldName"));
+      const res = await PUT(
+        req(`http://localhost/api/categories/${VALID_ID}`, "PUT", { name }),
+        { params: Promise.resolve({ id: VALID_ID }) }
+      );
+      expect(res.status).toBe(400);
+    }
+    expect(T().updateMany).not.toHaveBeenCalled();
+    expect(B().updateMany).not.toHaveBeenCalled();
+  });
+
+  it("400s a literal null body", async () => {
+    const { PUT } = await loadIdRoute();
+    const res = await PUT(
+      new Request(`http://localhost/api/categories/${VALID_ID}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: "null",
+      }),
+      { params: Promise.resolve({ id: VALID_ID }) }
+    );
+    expect(res.status).toBe(400);
   });
 });
 

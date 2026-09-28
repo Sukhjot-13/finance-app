@@ -3,6 +3,15 @@ import dbConnect from "@/lib/mongodb";
 import Budget from "@/models/budget.model";
 import { verifySession } from "@/lib/auth";
 import { isValidMonthKey, utcMonthKey } from "@/lib/utils";
+import { MAX_AMOUNT, toMinorUnits } from "@/lib/money";
+
+// Budgets are whole-unit caps (min 1), unlike transaction amounts.
+function coerceBudgetAmount(value) {
+  if (typeof value === "string" && value.trim() === "") return null;
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 1 || n > MAX_AMOUNT) return null;
+  return n;
+}
 
 // GET all budgets for the current month
 export async function GET(req) {
@@ -21,7 +30,7 @@ export async function GET(req) {
     const budgets = await Budget.find({ userId: user._id, month }).lean();
     return NextResponse.json(budgets, { status: 200 });
   } catch (error) {
-    console.error("GET budgets error:", error);
+    console.error("GET budgets error:", error?.message);
     return NextResponse.json({ message: "Server error" }, { status: 500 });
   }
 }
@@ -67,8 +76,10 @@ export async function POST(req) {
       );
     }
 
-    const amountNum = Number(amount);
-    if (!Number.isFinite(amountNum) || amountNum < 1) {
+    // Number.isFinite (not isNaN) so "Infinity"/"1e400" cannot be stored:
+    // a poisoned budget cap breaks the progress math permanently.
+    const amountNum = coerceBudgetAmount(amount);
+    if (amountNum === null) {
       return NextResponse.json(
         { message: "Budget must be a number of at least 1" },
         { status: 400 }
@@ -78,13 +89,13 @@ export async function POST(req) {
     // Upsert: create if not exists, update if does
     const budget = await Budget.findOneAndUpdate(
       { userId: user._id, category: category.trim(), month },
-      { amount: amountNum },
+      { amount: amountNum, amountMinor: toMinorUnits(amountNum) },
       { upsert: true, new: true, runValidators: true }
     );
 
     return NextResponse.json(budget, { status: 200 });
   } catch (error) {
-    console.error("POST budget error:", error);
+    console.error("POST budget error:", error?.message);
 
     if (error.code === 11000) {
       return NextResponse.json(
@@ -150,7 +161,7 @@ export async function DELETE(req) {
       { status: 200 }
     );
   } catch (error) {
-    console.error("DELETE budget error:", error);
+    console.error("DELETE budget error:", error?.message);
     return NextResponse.json(
       { message: "Error deleting budget" },
       { status: 500 }

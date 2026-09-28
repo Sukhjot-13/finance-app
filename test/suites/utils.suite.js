@@ -33,9 +33,10 @@ describe("formatCurrency", () => {
 
 describe("formatDate", () => {
   it("formats an ISO date as 'Month Day, Year'", () => {
-    expect(formatDate("2026-03-07T12:00:00Z")).toMatch(
-      /March 7, 2026|March 6, 2026/
-    );
+    // Noon UTC keeps the calendar day stable for offsets -12:00…+11:59, but
+    // zones further east (e.g. Pacific/Kiritimati, UTC+14) render the NEXT
+    // day. The day is therefore runner-TZ dependent; the shape is not.
+    expect(formatDate("2026-03-07T12:00:00Z")).toMatch(/^March \d{1,2}, 2026$/);
   });
 
   it("returns empty string for null/undefined/invalid input", () => {

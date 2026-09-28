@@ -70,17 +70,28 @@ export async function countRecentHits(key, windowMs) {
 /**
  * Resolves the caller IP for rate-limit bucketing.
  *
- * SECURITY: never trust the FIRST x-forwarded-for entry — any client can
- * prepend arbitrary values to that header. `x-real-ip` is set by our hosting
- * edge from the actual TCP peer, so prefer it; otherwise use the LAST
- * x-forwarded-for entry (appended by the closest proxy, not spoofable by
- * the client). Worst case the bucket key is coarse — the per-email bucket
- * (derived from validated input, not headers) remains the authoritative one.
+ * SECURITY: both headers below are attacker-controllable unless the edge
+ * strips them, and we cannot verify that from application code — the earlier
+ * code PREFERRED `x-real-ip` and asserted (in a comment) that the edge set
+ * it, which is not a property of the deployment we can observe. Rotating that
+ * header per request defeated the per-IP send (20/hour) and verify (25/15min)
+ * caps outright.
+ *
+ * Order of preference:
+ *   1. `request.ip` — set by the framework from the real socket peer. This is
+ *      the only source the app does not take on faith from a header, so it
+ *      wins whenever present.
+ *   2. The LAST `x-forwarded-for` entry — appended by the closest proxy, so
+ *      prepended client values are discarded (the FIRST entry is fully
+ *      client-controlled and is never read).
+ *
+ * Worst case the bucket key is coarse. The per-email bucket (derived from
+ * validated input, not headers) remains the authoritative one.
  */
 export function getClientIp(request) {
-  const realIp = request.headers.get("x-real-ip")?.trim();
-  if (realIp) return realIp;
-  const forwarded = request.headers.get("x-forwarded-for");
+  const direct = typeof request?.ip === "string" ? request.ip.trim() : "";
+  if (direct) return direct;
+  const forwarded = request?.headers?.get?.("x-forwarded-for");
   if (forwarded) {
     const parts = forwarded
       .split(",")

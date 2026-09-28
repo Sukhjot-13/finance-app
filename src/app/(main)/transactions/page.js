@@ -11,6 +11,8 @@ import { UserContext } from "@/app/(main)/layout";
 
 // Edit Transaction Modal Component (exported for tests)
 export function EditTransactionModal({ transaction, onClose, onSave }) {
+  // Null outside the (main) shell (tests render the modal standalone).
+  const { user } = useContext(UserContext) || {};
   const [formData, setFormData] = useState(() => ({
     ...transaction,
     date: formatDateForInput(new Date(transaction.date)),
@@ -90,6 +92,7 @@ export function EditTransactionModal({ transaction, onClose, onSave }) {
         date: new Date(formData.date + "T12:00:00"),
         description: formData.description,
         excludeFromBudget: !!formData.excludeFromBudget,
+        currency: user?.currency === "INR" ? "INR" : "USD",
       });
       if (result && !result.ok) {
         setModalError(result.message || "Failed to update transaction.");
@@ -136,12 +139,22 @@ export function EditTransactionModal({ transaction, onClose, onSave }) {
           )}
 
           <div>
-            <label className="block text-xs font-semibold text-zinc-400 uppercase tracking-wider font-mono mb-1.5">Type</label>
-            <div className="flex gap-2">
+            <label
+              htmlFor="edit-tx-type"
+              className="block text-xs font-semibold text-zinc-400 uppercase tracking-wider font-mono mb-1.5"
+            >
+              Type
+            </label>
+            <div
+              className="flex gap-2"
+              role="group"
+              aria-label="Transaction type"
+            >
               {["expense", "income"].map((t) => (
                 <button
                   key={t}
                   type="button"
+                  aria-pressed={formData.type === t}
                   onClick={() => {
                     // Keep the selection when the name exists in the other
                     // type's list — wiping it unconditionally loses input.
@@ -169,8 +182,14 @@ export function EditTransactionModal({ transaction, onClose, onSave }) {
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-zinc-400 uppercase tracking-wider font-mono mb-1.5">Amount</label>
+            <label
+              htmlFor="edit-tx-amount"
+              className="block text-xs font-semibold text-zinc-400 uppercase tracking-wider font-mono mb-1.5"
+            >
+              Amount
+            </label>
             <input
+              id="edit-tx-amount"
               type="number"
               name="amount"
               value={formData.amount}
@@ -184,8 +203,14 @@ export function EditTransactionModal({ transaction, onClose, onSave }) {
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-zinc-400 uppercase tracking-wider font-mono mb-1.5">Category</label>
+            <label
+              htmlFor="edit-tx-category"
+              className="block text-xs font-semibold text-zinc-400 uppercase tracking-wider font-mono mb-1.5"
+            >
+              Category
+            </label>
             <select
+              id="edit-tx-category"
               name="category"
               value={isAddingNewCategory ? "add_new" : formData.category}
               onChange={handleChange}
@@ -202,8 +227,14 @@ export function EditTransactionModal({ transaction, onClose, onSave }) {
 
           {isAddingNewCategory && (
             <div className="p-3 bg-zinc-950 rounded-xl border border-emerald-500/30 space-y-1.5">
-              <label className="block text-xs font-semibold text-emerald-400 uppercase tracking-wider font-mono">New Category Name</label>
+              <label
+                htmlFor="edit-tx-new-category"
+                className="block text-xs font-semibold text-emerald-400 uppercase tracking-wider font-mono"
+              >
+                New Category Name
+              </label>
               <input
+                id="edit-tx-new-category"
                 type="text"
                 value={newCategory}
                 onChange={(e) => setNewCategory(e.target.value)}
@@ -215,8 +246,14 @@ export function EditTransactionModal({ transaction, onClose, onSave }) {
           )}
 
           <div>
-            <label className="block text-xs font-semibold text-zinc-400 uppercase tracking-wider font-mono mb-1.5">Date</label>
+            <label
+              htmlFor="edit-tx-date"
+              className="block text-xs font-semibold text-zinc-400 uppercase tracking-wider font-mono mb-1.5"
+            >
+              Date
+            </label>
             <input
+              id="edit-tx-date"
               type="date"
               name="date"
               value={formData.date}
@@ -227,8 +264,14 @@ export function EditTransactionModal({ transaction, onClose, onSave }) {
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-zinc-400 uppercase tracking-wider font-mono mb-1.5">Description</label>
+            <label
+              htmlFor="edit-tx-description"
+              className="block text-xs font-semibold text-zinc-400 uppercase tracking-wider font-mono mb-1.5"
+            >
+              Description
+            </label>
             <input
+              id="edit-tx-description"
               type="text"
               name="description"
               value={formData.description || ''}
@@ -239,8 +282,9 @@ export function EditTransactionModal({ transaction, onClose, onSave }) {
           </div>
 
           {formData.type === "expense" && (
-            <label className="flex items-start gap-3 p-3 rounded-xl bg-zinc-950/60 border border-zinc-800/80 cursor-pointer hover:border-zinc-700">
+            <label className="flex items-start gap-3 p-3 rounded-xl bg-zinc-950/60 border border-zinc-800/80 cursor-pointer hover:border-zinc-700" htmlFor="edit-tx-exclude">
               <input
+                id="edit-tx-exclude"
                 type="checkbox"
                 name="excludeFromBudget"
                 checked={!!formData.excludeFromBudget}
@@ -525,7 +569,12 @@ export default function TransactionsPage() {
         }));
         setError("");
       })
-      .catch(console.error);
+      // A failed refresh after a successful save used to console.error only,
+      // so no banner appeared and the user kept looking at the PRE-EDIT list
+      // believing the change had not taken.
+      .catch(() =>
+        setError("Your change was saved, but the list couldn't be refreshed.")
+      );
   };
 
   const handleDelete = async (id) => {
@@ -670,17 +719,26 @@ export default function TransactionsPage() {
         {/* Filters bar */}
         <div className="flex flex-col sm:flex-row flex-wrap gap-3 p-4 rounded-xl bg-zinc-950/60 border border-zinc-800/80">
           <div className="relative w-full sm:flex-1">
+            <label htmlFor="tx-filter-search" className="sr-only">
+              Search transactions
+            </label>
             <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-500" />
             <input
-              type="text"
+              id="tx-filter-search"
+              type="search"
               placeholder="Search..."
+              aria-label="Search transactions"
               value={filters.search}
               onChange={(e) => updateFilter("search", e.target.value)}
               className="w-full bg-zinc-900 border border-zinc-800 rounded-xl pl-9 pr-3.5 py-2 text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/40 transition-all"
             />
           </div>
           <div className="flex gap-2.5 flex-wrap">
+            <label htmlFor="tx-filter-type" className="sr-only">
+              Filter by type
+            </label>
             <select
+              id="tx-filter-type"
               value={filters.type}
               onChange={(e) => updateFilter("type", e.target.value)}
               className="bg-zinc-900 border border-zinc-800 rounded-xl px-3.5 py-2 text-sm text-zinc-200 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/40 cursor-pointer"
@@ -689,7 +747,11 @@ export default function TransactionsPage() {
               <option value="income">Income</option>
               <option value="expense">Expense</option>
             </select>
+            <label htmlFor="tx-filter-category" className="sr-only">
+              Filter by category
+            </label>
             <select
+              id="tx-filter-category"
               value={filters.category}
               onChange={(e) => updateFilter("category", e.target.value)}
               className="bg-zinc-900 border border-zinc-800 rounded-xl px-3.5 py-2 text-sm text-zinc-200 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/40 cursor-pointer"
@@ -700,14 +762,18 @@ export default function TransactionsPage() {
               ))}
             </select>
             <input
+              id="tx-filter-start"
               type="date"
+              aria-label="Filter by start date"
               value={filters.startDate}
               onChange={(e) => updateFilter("startDate", e.target.value)}
               className="bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/40 min-w-0 sm:min-w-[130px]"
               title="Start date"
             />
             <input
+              id="tx-filter-end"
               type="date"
+              aria-label="Filter by end date"
               value={filters.endDate}
               onChange={(e) => updateFilter("endDate", e.target.value)}
               className="bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/40 min-w-0 sm:min-w-[130px]"

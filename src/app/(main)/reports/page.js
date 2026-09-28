@@ -15,7 +15,8 @@ import {
 import { formatCurrency, formatDateForInput } from "@/lib/utils";
 import api from "@/lib/api";
 import { UserContext } from "@/app/(main)/layout";
-import { BarChart3, TrendingUp, TrendingDown, PiggyBank, Calendar, Sparkles, ArrowRight } from "lucide-react";
+import RecurringManager from "@/components/RecurringManager";
+import { BarChart3, TrendingUp, TrendingDown, PiggyBank, Sparkles, ArrowRight, Download } from "lucide-react";
 
 ChartJS.register(
   CategoryScale,
@@ -34,7 +35,45 @@ export default function ReportsPage() {
   const [report, setReport] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState("");
   const { user } = useContext(UserContext);
+
+  // Downloads the CSV for the currently selected window. The endpoint was
+  // complete and tested but had no UI caller at all.
+  const exportCsv = async () => {
+    setExporting(true);
+    setExportError("");
+    try {
+      const params = new URLSearchParams();
+      if (startDate) {
+        const from = new Date(startDate + "T00:00:00");
+        if (!isNaN(from.getTime())) params.set("start", from.toISOString());
+      }
+      if (endDate) {
+        const to = new Date(endDate + "T23:59:59.999");
+        if (!isNaN(to.getTime())) params.set("end", to.toISOString());
+      }
+      const res = await api(`/api/reports/export?${params.toString()}`);
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.message || "Failed to export your transactions.");
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "fintrack-transactions.csv";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setExportError(err.message || "Failed to export your transactions.");
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const applyPreset = (type) => {
     const now = new Date();
@@ -231,13 +270,31 @@ export default function ReportsPage() {
           >
             {loading ? "Generating..." : "Generate"}
           </button>
+          <button
+            onClick={exportCsv}
+            disabled={exporting}
+            className="px-5 py-2.5 bg-zinc-950 border border-zinc-800 text-zinc-200 hover:text-white hover:border-zinc-700 rounded-xl text-sm font-semibold transition-all disabled:opacity-50 inline-flex items-center gap-2"
+          >
+            <Download size={15} />
+            {exporting ? "Exporting..." : "Export CSV"}
+          </button>
         </div>
         {error && (
           <p className="mt-4 p-3 bg-rose-500/10 border border-rose-500/30 text-rose-300 rounded-xl text-xs font-medium">
             {error}
           </p>
         )}
+        {exportError && (
+          <p
+            role="alert"
+            className="mt-4 p-3 bg-rose-500/10 border border-rose-500/30 text-rose-300 rounded-xl text-xs font-medium"
+          >
+            {exportError}
+          </p>
+        )}
       </div>
+
+      <RecurringManager />
 
       {/* Empty State when no report generated */}
       {!report && !loading && (

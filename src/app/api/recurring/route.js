@@ -4,14 +4,15 @@ import Recurring from "@/models/recurring.model";
 import { verifySession } from "@/lib/auth";
 import { firstRunDate } from "@/lib/recurring";
 import { sendError, sendSuccess } from "@/lib/server-utils";
+import { coerceAmount, toMinorUnits } from "@/lib/money";
 
 function validateRuleBody(body) {
   const { type, amount, category, frequency, dayOfMonth, dayOfWeek } = body || {};
   if (type !== "income" && type !== "expense") {
     return "type must be income or expense.";
   }
-  const amountNum = Number(amount);
-  if (!Number.isFinite(amountNum) || amountNum <= 0) {
+  const amountNum = coerceAmount(amount);
+  if (amountNum === null) {
     return "amount must be a positive number.";
   }
   if (typeof category !== "string" || !category.trim() || category.trim().length > 50) {
@@ -66,6 +67,9 @@ export async function POST(req) {
   } catch {
     return sendError("Invalid request body.", 400);
   }
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return sendError("Invalid request body.", 400);
+  }
   const validationError = validateRuleBody(body);
   if (validationError) {
     return sendError(validationError, 400);
@@ -75,7 +79,9 @@ export async function POST(req) {
     const rule = new Recurring({
       userId: user._id,
       type: body.type,
-      amount: Number(body.amount),
+      amount: coerceAmount(body.amount),
+      amountMinor: toMinorUnits(coerceAmount(body.amount)),
+      currency: body.currency === "INR" ? "INR" : "USD",
       category: body.category.trim(),
       description: body.description?.trim() || "",
       frequency: body.frequency,

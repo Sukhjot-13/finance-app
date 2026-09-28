@@ -1,8 +1,12 @@
 // test/suites/proxy.suite.js — src/proxy.js routing + CSP
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { NextRequest } from "next/server";
+import { generateRefreshToken } from "@/lib/auth";
 
 const loadProxy = () => import("@/proxy");
+
+/** A genuinely signed refresh-session JWT (the proxy now verifies it). */
+const realSession = () => generateRefreshToken("64b64b64b64b64b64b64b64b");
 
 const makeReq = (path, { cookies = {} } = {}) => {
   const req = new NextRequest(`http://localhost${path}`);
@@ -14,15 +18,17 @@ const makeReq = (path, { cookies = {} } = {}) => {
 
 describe("proxy() routing", () => {
   let mod;
+  let session;
 
   beforeEach(async () => {
     vi.clearAllMocks();
     vi.resetModules();
     mod = await loadProxy();
+    session = realSession();
   });
 
   it("redirects logged-in users away from /login → /dashboard", async () => {
-    const res = await mod.proxy(makeReq("/login", { cookies: { refreshToken: "r" } }));
+    const res = await mod.proxy(makeReq("/login", { cookies: { refreshToken: session } }));
     expect(res.status).toBe(307);
     expect(res.headers.get("location")).toBe("http://localhost/dashboard");
   });
@@ -35,7 +41,7 @@ describe("proxy() routing", () => {
 
   it("does NOT bounce logged-in users off /welcome (onboarding fix)", async () => {
     const res = await mod.proxy(
-      makeReq("/welcome", { cookies: { refreshToken: "r" } })
+      makeReq("/welcome", { cookies: { refreshToken: session } })
     );
     expect(res.status).not.toBe(307);
   });
@@ -44,6 +50,71 @@ describe("proxy() routing", () => {
     const res = await mod.proxy(makeReq("/welcome"));
     expect(res.status).toBe(307);
     expect(res.headers.get("location")).toBe("http://localhost/login");
+  });
+
+  it("FAILS CLOSED on a forged or garbage session cookie", async () => {
+    const jwt = (await import("jsonwebtoken")).default;
+    const wrongKey = jwt.sign({ userId: "x" }, "a-completely-different-secret-32ch", {
+      expiresIn: "1h",
+    });
+
+    for (const forged of [
+      "anything",
+      "not.a.jwt",
+      wrongKey,
+      `${session}tampered`,
+      // unsigned "alg: none" attempt
+      `${Buffer.from('{"alg":"none"}').toString("base64url")}.${Buffer.from(
+        '{"userId":"x"}'
+      ).toString("base64url")}.`,
+    ]) {
+      const res = await mod.proxy(
+        makeReq("/dashboard", { cookies: { refreshToken: forged } })
+      );
+      expect(res.status).toBe(307);
+      expect(res.headers.get("location")).toBe("http://localhost/login");
+    }
+  });
+
+  it("fails closed on an EXPIRED session cookie", async () => {
+    const jwt = (await import("jsonwebtoken")).default;
+    const expired = jwt.sign({ userId: "x" }, process.env.REFRESH_TOKEN_SECRET, {
+      expiresIn: "-1h",
+    });
+    const res = await mod.proxy(
+      makeReq("/transactions", { cookies: { refreshToken: expired } })
+    );
+    expect(res.status).toBe(307);
+    expect(res.headers.get("location")).toBe("http://localhost/login");
+  });
+
+  it("a valid session is allowed through protected pages", async () => {
+    for (const path of ["/dashboard", "/transactions", "/profile", "/reports", "/categories"]) {
+      const res = await mod.proxy(makeReq(path, { cookies: { refreshToken: session } }));
+      expect(res.status).not.toBe(307);
+    }
+  });
+
+  it("does NOT treat /api-prefixed look-alikes as public (prefix bypass)", async () => {
+    // The old `pathname.startsWith("/api")` made all of these public.
+    for (const path of ["/api-docs", "/apifoo", "/apix/../dashboard", "/api-docs/secret"]) {
+      const res = await mod.proxy(makeReq(path));
+      expect(res.status).toBe(307);
+      expect(res.headers.get("location")).toBe("http://localhost/login");
+    }
+  });
+
+  it("does NOT treat /login-prefixed look-alikes as public", async () => {
+    const res = await mod.proxy(makeReq("/login-x"));
+    expect(res.status).toBe(307);
+    expect(res.headers.get("location")).toBe("http://localhost/login");
+  });
+
+  it("still treats the exact paths and their subtrees as public", async () => {
+    for (const path of ["/login", "/api", "/api/user", "/api/reports/export"]) {
+      const res = await mod.proxy(makeReq(path));
+      expect(res.status).not.toBe(307);
+    }
   });
 
   it("passes page requests through WITH a per-request CSP nonce header", async () => {

@@ -4,6 +4,7 @@ import dbConnect from "@/lib/mongodb";
 import Recurring from "@/models/recurring.model";
 import { verifySession } from "@/lib/auth";
 import { sendError, sendSuccess } from "@/lib/server-utils";
+import { coerceAmount, toMinorUnits } from "@/lib/money";
 
 async function findOwnedRule(id, userId) {
   if (!mongoose.Types.ObjectId.isValid(id)) return null;
@@ -22,6 +23,10 @@ export async function PATCH(req, { params }) {
   } catch {
     return sendError("Invalid request body.", 400);
   }
+  // A literal `null` body resolves to null without throwing.
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return sendError("Invalid request body.", 400);
+  }
   try {
     await dbConnect();
     const rule = await findOwnedRule(id, user._id);
@@ -31,11 +36,12 @@ export async function PATCH(req, { params }) {
     // Editable: amount, category, description, active. Schedule changes go
     // through delete + recreate so nextRunAt stays unambiguous.
     if (body.amount !== undefined) {
-      const amountNum = Number(body.amount);
-      if (!Number.isFinite(amountNum) || amountNum <= 0) {
+      const amountNum = coerceAmount(body.amount);
+      if (amountNum === null) {
         return sendError("amount must be a positive number.", 400);
       }
       rule.amount = amountNum;
+      rule.amountMinor = toMinorUnits(amountNum);
     }
     if (body.category !== undefined) {
       if (typeof body.category !== "string" || !body.category.trim() || body.category.trim().length > 50) {

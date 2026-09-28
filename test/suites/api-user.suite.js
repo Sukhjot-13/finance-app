@@ -141,4 +141,35 @@ describe("PUT /api/user", () => {
     const res = await PUT(req("PUT", { accountName: "x" }));
     expect(res.status).toBe(404);
   });
+
+  it("400s a literal null body instead of a TypeError 500", async () => {
+    // `await req.json()` resolves to null for the body `null` — it does NOT
+    // throw — so `body.accountName` raised a TypeError inside the handler's
+    // try and surfaced as a 500 "Server error".
+    const { PUT } = await loadRoute();
+    const res = await PUT(
+      new Request("http://localhost/api/user", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: "null",
+      })
+    );
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({
+      message: /Invalid request body/,
+    });
+    expect(globalThis.__models.user.findByIdAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it("400s an array body", async () => {
+    const { PUT } = await loadRoute();
+    const res = await PUT(
+      new Request("http://localhost/api/user", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: "[]",
+      })
+    );
+    expect(res.status).toBe(400);
+  });
 });

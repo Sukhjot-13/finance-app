@@ -30,19 +30,25 @@ export async function POST(req) {
       { $set: { refreshTokens: [] } } // This empties the array
     );
   } catch (error) {
-    console.error("Logout-all error:", error.message);
-    // Don't pretend it worked — other devices may still have live sessions.
-    cookieStore.delete("accessToken");
-    cookieStore.delete("refreshToken");
-    return sendError(
-      "Could not log out from all devices. Please log in and try again.",
-      500
-    );
+    // Same contract as /api/auth/logout: this device is genuinely signed
+    // out (cookies cleared), so return 200 with an explicit `revoked: false`
+    // + machine-readable code rather than a 500 that contradicts the
+    // response the client actually needs to act on.
+    console.error("Logout-all error:", error?.message);
+    return sendSuccess({
+      message:
+        "Signed out on this device, but other devices may still be signed in. Please log back in and try again.",
+      revoked: false,
+      code: "SERVER_REVOKE_ALL_FAILED",
+    });
   } finally {
     // Clear the cookies on the client side regardless of DB operation success
     cookieStore.delete("accessToken");
     cookieStore.delete("refreshToken");
   }
 
-  return sendSuccess({ message: "Successfully logged out from all devices." });
+  return sendSuccess({
+    message: "Successfully logged out from all devices.",
+    revoked: true,
+  });
 }

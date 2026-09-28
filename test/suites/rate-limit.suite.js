@@ -73,15 +73,33 @@ describe("rate-limit lib", () => {
     await expect(resetKey("k")).resolves.toBeUndefined();
   });
 
-  it("getClientIp prefers x-real-ip over spoofable x-forwarded-for", async () => {
+  it("getClientIp prefers request.ip and NEVER trusts a client header", async () => {
     const { getClientIp } = await loadLib();
-    const req = (headers) => ({ headers: new Headers(headers) });
+    const req = (headers, ip) => ({ headers: new Headers(headers), ip });
 
-    expect(getClientIp(req({ "x-real-ip": "9.9.9.9", "x-forwarded-for": "1.1.1.1" }))).toBe("9.9.9.9");
-    // without x-real-ip: LAST forwarded entry (edge-appended), not the first
+    // request.ip comes from the framework's socket peer, not a header.
+    expect(getClientIp(req({ "x-real-ip": "6.6.6.6" }, "5.5.5.5"))).toBe("5.5.5.5");
+
+    // The x-real-ip PREFERENCE is gone: it is a plain request header and was
+    // trivially rotated to reset both per-IP buckets.
+    expect(getClientIp(req({ "x-real-ip": "9.9.9.9", "x-forwarded-for": "1.1.1.1" }))).toBe("1.1.1.1");
+    // without x-forwarded-for, x-real-ip is ignored entirely
+    expect(getClientIp(req({ "x-real-ip": "9.9.9.9" }))).toBe("unknown");
+    // LAST forwarded entry (edge-appended), never the first client-supplied one
     expect(getClientIp(req({ "x-forwarded-for": "spoofed, 2.2.2.2" }))).toBe("2.2.2.2");
     expect(getClientIp(req({ "x-forwarded-for": "3.3.3.3" }))).toBe("3.3.3.3");
     expect(getClientIp(req({}))).toBe("unknown");
+  });
+
+  it("a rotated x-real-ip cannot reset the OTP send bucket", async () => {
+    const { getClientIp } = await loadLib();
+    const keys = new Set();
+    for (const spoofed of ["1.1.1.1", "2.2.2.2", "3.3.3.3", "4.4.4.4", "5.5.5.5"]) {
+      keys.add(getClientIp({ headers: new Headers({ "x-real-ip": spoofed }) }));
+    }
+    // Every request lands in the SAME "unknown" bucket, so the 20/hour
+    // per-IP cap cannot be sidestepped by rotating the header.
+    expect([...keys]).toEqual(["unknown"]);
   });
 
   it("recordHitAndCount allows up to max, denies beyond, and fails open", async () => {

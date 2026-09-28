@@ -86,15 +86,20 @@ vi.mock("@getbrevo/brevo", () => ({
   },
 }));
 
-// ---- Chart stack for SimpleChart ----
+// ---- Chart stack (SimpleChart pie + ReportsPage bar) ----
 vi.mock("chart.js", () => ({
   Chart: { register: () => {} },
   ArcElement: function ArcElement() {},
   Tooltip: function Tooltip() {},
   Legend: function Legend() {},
+  CategoryScale: function CategoryScale() {},
+  LinearScale: function LinearScale() {},
+  BarElement: function BarElement() {},
+  Title: function Title() {},
 }));
 vi.mock("react-chartjs-2", () => ({
   Pie: (props) => globalThis.__pieComponent(props),
+  Bar: () => null,
 }));
 
 // ------------------------------------------------------------------

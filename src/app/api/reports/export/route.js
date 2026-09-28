@@ -4,28 +4,39 @@ import dbConnect from "@/lib/mongodb";
 import Transaction from "@/models/transaction.model";
 import { verifySession } from "@/lib/auth";
 import { NextResponse } from "next/server";
+import { fromMinorUnits } from "@/lib/money";
 
 // Max rows per export — a full-history dump must not hammer the tier.
 const MAX_ROWS = 10000;
 
 /**
- * Neutralize CSV formula injection: exported text is user-writable, and
- * spreadsheet apps execute cells starting with = + - @ (plus tab/CR).
+ * Neutralize CSV formula injection AND row splitting.
+ *
+ * Exported text is user-writable and spreadsheet apps execute cells starting
+ * with `= + - @` (plus tab/CR). A BARE CR was the hole: the quoting rule
+ * didn't treat CR as structural and the prefix guard only fired when CR was
+ * the FIRST character, so `x\r=1+1` exported unquoted and Excel split it
+ * into a second row whose first cell `=1+1` EXECUTED.
+ *
+ * Newlines are therefore collapsed to spaces BEFORE both the formula guard
+ * and the quoting decision, so no cell value can ever produce a second row.
  */
 export function sanitizeCsvCell(value) {
-  const text = value === null || value === undefined ? "" : String(value);
+  const raw = value === null || value === undefined ? "" : String(value);
+  const text = raw.replace(/[\r\n]+/g, " ");
   if (/^[=+\-@\t\r]/.test(text)) {
     return `'${text}`;
   }
   return text;
 }
 
-function toCsvRow(cells) {
+export function toCsvRow(cells) {
   return cells
     .map((cell) => {
       const text = sanitizeCsvCell(cell);
-      // Quote when the cell contains a structural character.
-      return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+      // Quote when the cell contains a structural character (CR included,
+      // even though sanitizeCsvCell already removes it — defense in depth).
+      return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
     })
     .join(",");
 }
@@ -72,14 +83,18 @@ export async function GET(req) {
     const truncated = docs.length > MAX_ROWS;
     const rows = docs.slice(0, MAX_ROWS);
 
-    const header = ["date", "type", "amount", "category", "description"];
+    const header = ["date", "type", "amount", "currency", "category", "description"];
     const lines = [header.join(",")];
     for (const tx of rows) {
       lines.push(
         toCsvRow([
           tx.date ? new Date(tx.date).toISOString() : "",
           tx.type || "",
-          tx.amount ?? "",
+          // Integer minor units render exactly — the float could carry drift.
+          Number.isInteger(tx.amountMinor)
+            ? fromMinorUnits(tx.amountMinor).toFixed(2)
+            : tx.amount ?? "",
+          tx.currency || "USD",
           tx.category || "",
           tx.description || "",
         ])

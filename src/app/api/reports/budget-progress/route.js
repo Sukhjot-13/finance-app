@@ -5,6 +5,7 @@ import { verifySession } from "@/lib/auth";
 import mongoose from "mongoose";
 import { NextResponse } from "next/server";
 import { isValidMonthKey, utcMonthKey } from "@/lib/utils";
+import { AMOUNT_MINOR_EXPR, fromMinorUnits, toMinorUnits } from "@/lib/money";
 
 const OVERALL_CATEGORY = "__total__";
 
@@ -83,16 +84,18 @@ export async function GET(req) {
       {
         $group: {
           _id: "$category",
-          spent: { $sum: "$amount" },
+          spentMinor: { $sum: AMOUNT_MINOR_EXPR },
         },
       },
     ]);
 
-    const spendingMap = {};
-    let totalSpent = 0;
-    spending.forEach((s) => {
-      spendingMap[s._id] = s.spent;
-      totalSpent += s.spent;
+    // Object.create(null): a category literally named "constructor" or
+    // "__proto__" must not resolve to an inherited Object property.
+    const spendingMap = Object.create(null);
+    let totalSpentMinor = 0;
+    (spending || []).forEach((s) => {
+      spendingMap[s._id] = s.spentMinor || 0;
+      totalSpentMinor += s.spentMinor || 0;
     });
 
     // Sum of one-time expenses excluded from the budget this month, so the UI
@@ -109,47 +112,64 @@ export async function GET(req) {
       {
         $group: {
           _id: null,
-          spent: { $sum: "$amount" },
+          spentMinor: { $sum: AMOUNT_MINOR_EXPR },
         },
       },
     ]);
-    const excludedSpent = excludedResult.length > 0 ? excludedResult[0].spent : 0;
+    const excludedSpent = fromMinorUnits(
+      excludedResult.length > 0 ? excludedResult[0].spentMinor || 0 : 0
+    );
 
     // Separate overall budget from per-category budgets
     const overallBudgetEntry = budgets.find((b) => b.category === OVERALL_CATEGORY);
     const categoryBudgets = budgets.filter((b) => b.category !== OVERALL_CATEGORY);
 
+    const totalSpent = fromMinorUnits(totalSpentMinor);
+
+    // Budget caps in minor units too, so spent-vs-budget never compares
+    // unrepresentable floats. Legacy budgets without amountMinor fall back
+    // to a rounded conversion of `amount`.
+    const budgetMinorOf = (budget) =>
+      Number.isInteger(budget.amountMinor) ? budget.amountMinor : toMinorUnits(budget.amount);
+
+    const pct = (spentMinor, capMinor) =>
+      capMinor > 0 ? Math.min((spentMinor / capMinor) * 100, 100) : 0;
+
     // Overall budget progress
     let overall = null;
     if (overallBudgetEntry) {
-      const spent = totalSpent;
-      const percentage = overallBudgetEntry.amount > 0 ? Math.min((spent / overallBudgetEntry.amount) * 100, 100) : 0;
+      const capMinor = budgetMinorOf(overallBudgetEntry);
+      const spentMinor = totalSpentMinor;
       overall = {
         budget: overallBudgetEntry.amount,
-        spent,
-        remaining: Math.max(overallBudgetEntry.amount - spent, 0),
-        percentage: Math.round(percentage),
-        overBudget: spent > overallBudgetEntry.amount,
+        spent: fromMinorUnits(spentMinor),
+        remaining: fromMinorUnits(Math.max(capMinor - spentMinor, 0)),
+        percentage: Math.round(pct(spentMinor, capMinor)),
+        overBudget: spentMinor > capMinor,
       };
     }
 
-    // Per-category progress
+    // Per-category progress. Object.hasOwn (not `||`) so a legitimate $0
+    // spend is reported as 0 instead of falling through to a prototype
+    // lookup for a category literally named "constructor".
     const progress = categoryBudgets.map((budget) => {
-      const spent = spendingMap[budget.category] || 0;
-      const percentage = budget.amount > 0 ? Math.min((spent / budget.amount) * 100, 100) : 0;
+      const capMinor = budgetMinorOf(budget);
+      const spentMinor = Object.hasOwn(spendingMap, budget.category)
+        ? spendingMap[budget.category]
+        : 0;
       return {
         category: budget.category,
         budget: budget.amount,
-        spent,
-        remaining: Math.max(budget.amount - spent, 0),
-        percentage: Math.round(percentage),
-        overBudget: spent > budget.amount,
+        spent: fromMinorUnits(spentMinor),
+        remaining: fromMinorUnits(Math.max(capMinor - spentMinor, 0)),
+        percentage: Math.round(pct(spentMinor, capMinor)),
+        overBudget: spentMinor > capMinor,
       };
     });
 
     return NextResponse.json({ overall, progress, totalSpent, excludedSpent }, { status: 200 });
   } catch (error) {
-    console.error("Budget progress API Error:", error);
+    console.error("Budget progress API Error:", error?.message);
     return NextResponse.json({ message: "Server error" }, { status: 500 });
   }
 }

@@ -38,6 +38,11 @@ export async function PUT(req) {
     } catch {
         return NextResponse.json({ message: "Invalid request body" }, { status: 400 });
     }
+    // A literal `null` body parses to null WITHOUT throwing, so the property
+    // access below would raise a TypeError and become a 500. 400 instead.
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+        return NextResponse.json({ message: "Invalid request body" }, { status: 400 });
+    }
 
     try {
         await dbConnect();

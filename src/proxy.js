@@ -1,5 +1,6 @@
 // src/proxy.js
 import { NextResponse } from "next/server";
+import { jwtVerify } from "jose";
 
 /**
  * Builds a strict Content-Security-Policy for page requests.
@@ -28,30 +29,63 @@ function buildCsp(nonce) {
   ].join("; ");
 }
 
+/**
+ * Verifies the refresh-session cookie's JWT signature.
+ *
+ * The old gate only checked that a `refreshToken` cookie was PRESENT, which
+ * made this the one default-allow page guard: `refreshToken=anything`
+ * rendered /dashboard, /transactions and /profile. (No data leaked — every
+ * API route independently calls verifySession() — but the page shell itself
+ * was reachable.)
+ *
+ * Fails CLOSED on any error: a missing secret, a malformed token, a bad
+ * signature, an expired token, or an unexpected algorithm all mean "not
+ * authenticated".
+ */
+async function hasValidSession(token) {
+  if (!token) return false;
+  const secret = process.env.REFRESH_TOKEN_SECRET;
+  if (!secret) return false;
+  try {
+    await jwtVerify(token, new TextEncoder().encode(secret), {
+      algorithms: ["HS256"],
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Public paths must match EXACTLY or on a path-segment boundary. The old
+ * `pathname.startsWith(p)` made /api-docs, /apifoo and /login-x public.
+ */
+const PUBLIC_PATHS = ["/login", "/api"];
+
+function isPublicPath(pathname) {
+  return PUBLIC_PATHS.some(
+    (p) => pathname === p || pathname.startsWith(`${p}/`)
+  );
+}
+
 export async function proxy(request) {
   const { pathname } = request.nextUrl;
   const refreshToken = request.cookies.get("refreshToken")?.value;
+  const authenticated = await hasValidSession(refreshToken);
 
-  // If the user is logged in (has a refresh token) and tries to
+  // If the user is logged in (has a VERIFIED session) and tries to
   // access the login page, redirect them to the dashboard.
   // NOTE: /welcome is intentionally NOT bounced — a brand-new user lands
   // there straight after OTP verification (with cookies already set), and
   // bouncing them would break onboarding entirely. Anonymous visitors are
   // still redirected to /login by the publicPaths check below.
-  if (refreshToken && pathname === "/login") {
+  if (authenticated && pathname === "/login") {
     return NextResponse.redirect(new URL("/dashboard", request.url));
   }
 
-  // Define public paths that don't require authentication
-  // All /api routes are excluded — they handle their own auth (return 401 when unauthenticated).
-  const publicPaths = [
-    "/login",
-    "/api",
-  ];
-
   // If the user is not logged in and is trying to access a protected route,
   // redirect them to the login page.
-  if (!refreshToken && !publicPaths.some((path) => pathname.startsWith(path))) {
+  if (!authenticated && !isPublicPath(pathname)) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     return NextResponse.redirect(url);

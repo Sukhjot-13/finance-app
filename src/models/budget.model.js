@@ -17,6 +17,19 @@ const BudgetSchema = new mongoose.Schema(
       type: Number,
       required: true,
       min: [1, "Budget must be at least 1"],
+      // `amount > 1` is true for Infinity, so finiteness is explicit.
+      validate: {
+        validator: function (v) {
+          return Number.isFinite(v) && v >= 1;
+        },
+        message: "Budget must be a finite number of at least 1",
+      },
+    },
+    // INTEGER minor units so budget caps and spend compare exactly.
+    amountMinor: {
+      type: Number,
+      required: false,
+      min: [1, "Budget must be at least 1"],
     },
     month: {
       type: String,

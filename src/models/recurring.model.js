@@ -21,17 +21,35 @@ const RecurringSchema = new mongoose.Schema(
       type: Number,
       required: true,
       min: [0.01, "Amount must be greater than 0"],
+      validate: {
+        validator: function (v) {
+          return Number.isFinite(v) && v > 0;
+        },
+        message: "Amount must be a positive finite number",
+      },
+    },
+    // INTEGER minor units — materialized transactions sum this rather than
+    // the float, so repeated materialization cannot introduce float drift.
+    amountMinor: {
+      type: Number,
+      required: true,
+      min: [1, "Amount must be greater than 0"],
+    },
+    currency: {
+      type: String,
+      enum: ["USD", "INR"],
+      default: "USD",
     },
     category: {
       type: String,
       required: true,
       trim: true,
-      maxlength: [50, "Category name cannot exceed 50 characters"],
+      maxlength: [50, "Category name cannot exceed 50 characters"]
     },
     description: {
       type: String,
       trim: true,
-      maxlength: [200, "Description cannot exceed 200 characters"],
+      maxlength: [200, "Description cannot exceed 200 characters"]
     },
     frequency: {
       type: String,

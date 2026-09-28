@@ -162,6 +162,99 @@ describe("POST /api/transactions", () => {
     expect(T().instanceSave.mock.contexts.at(-1).excludeFromBudget).toBe(false);
   });
 
+  it.each([
+    "Infinity",
+    "-Infinity",
+    "1e400",
+    "-1e400",
+    "NaN",
+    1e400,
+  ])("400s the non-finite amount %p instead of poisoning every aggregate", async (amount) => {
+    const res = await post({
+      type: "expense",
+      amount,
+      category: "Food",
+      date: new Date().toISOString(),
+    });
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({
+      message: /positive number/i,
+    });
+    // Nothing was persisted — a single Infinity row made currentBalance,
+    // monthlyIncome/Expenses, the balance aggregation and every budget
+    // rollup ±Infinity for the user PERMANENTLY.
+    expect(T().instanceSave).not.toHaveBeenCalled();
+  });
+
+  it("rejects amounts above the 1e12 cap", async () => {
+    const res = await post({
+      type: "expense",
+      amount: "1e13",
+      category: "Food",
+      date: new Date().toISOString(),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("still accepts a decimal string and coerces it to a Number", async () => {
+    const res = await post({
+      type: "expense",
+      amount: "42.50",
+      category: "Food",
+      date: new Date().toISOString(),
+    });
+    expect(res.status).toBe(201);
+    const ctx = T().instanceSave.mock.contexts.at(-1);
+    expect(ctx.amount).toBe(42.5);
+    expect(typeof ctx.amount).toBe("number");
+    // Integer minor units are stored alongside for exact report math.
+    expect(ctx.amountMinor).toBe(4250);
+  });
+
+  it("400s a literal null body (req.json() resolves to null, it does not throw)", async () => {
+    const { POST } = await loadRoute();
+    const res = await POST(
+      new Request("http://localhost/api/transactions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "null",
+      })
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("400s an array body", async () => {
+    const { POST } = await loadRoute();
+    const res = await POST(
+      new Request("http://localhost/api/transactions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "[]",
+      })
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("records the transaction currency and rejects unsupported values", async () => {
+    await post({
+      type: "expense",
+      amount: 5,
+      category: "Food",
+      date: new Date().toISOString(),
+      currency: "INR",
+    });
+    expect(T().instanceSave.mock.contexts.at(-1).currency).toBe("INR");
+
+    const bad = await post({
+      type: "expense",
+      amount: 5,
+      category: "Food",
+      date: new Date().toISOString(),
+      currency: "GBP",
+    });
+    expect(bad.status).toBe(400);
+  });
+
   it("400s malformed JSON and non-string descriptions", async () => {
     const { POST } = await loadRoute();
     const badJson = await POST(
@@ -258,6 +351,9 @@ describe("/api/transactions/[id]", () => {
         [{ amount: 0 }, "Amount must be a positive number"],
         [{ amount: -5 }, "Amount must be a positive number"],
         [{ amount: "abc" }, "Amount must be a positive number"],
+        [{ amount: "Infinity" }, "Amount must be a positive number"],
+        [{ amount: "1e400" }, "Amount must be a positive number"],
+        [{ amount: "-Infinity" }, "Amount must be a positive number"],
         [{ type: "bogus" }, "Transaction type must be"],
         [{ category: "  " }, "Category is required"],
         [{ category: "x".repeat(51) }, "cannot exceed 50 characters"],
@@ -271,6 +367,32 @@ describe("/api/transactions/[id]", () => {
         );
         expect(res.status).toBe(400);
         await expect(res.json()).resolves.toMatchObject({ error: expect.stringContaining(message) });
+        expect(T().findOneAndUpdate).not.toHaveBeenCalled();
+      });
+
+      it("keeps amountMinor in sync when the amount changes", async () => {
+        T().findOneAndUpdate.mockResolvedValueOnce({});
+        const { PUT } = await loadIdRoute();
+        await PUT(
+          req("http://localhost/api/t/" + VALID, "PUT", { amount: "7.25" }),
+          { params: Promise.resolve({ id: VALID }) }
+        );
+        const update = T().findOneAndUpdate.mock.calls[0][1];
+        expect(update.amount).toBe(7.25);
+        expect(update.amountMinor).toBe(725);
+      });
+
+      it("400s a literal null body instead of a TypeError 500", async () => {
+        const { PUT } = await loadIdRoute();
+        const res = await PUT(
+          new Request("http://localhost/api/t/" + VALID, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: "null",
+          }),
+          { params: Promise.resolve({ id: VALID }) }
+        );
+        expect(res.status).toBe(400);
         expect(T().findOneAndUpdate).not.toHaveBeenCalled();
       });
 

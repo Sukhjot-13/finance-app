@@ -1,12 +1,13 @@
 // src/components/AddTransactionDrawer.js
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useContext } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { X, Plus, Minus, Calendar, Tag, FileText, CheckCircle2 } from "lucide-react";
 import api from "@/lib/api";
 import { formatDateForInput } from "@/lib/utils";
 import { useDialogA11y } from "@/lib/useDialogA11y";
+import { UserContext } from "@/app/(main)/layout";
 
 // A custom segmented control for a modern fintech UI
 function SegmentedControl({ value, onChange, options }) {
@@ -46,6 +47,9 @@ export default function AddTransactionDrawer({
   onClose,
   onTransactionAdded,
 }) {
+  // The context is null when the drawer is rendered outside the (main)
+  // shell (tests, storybook) — fall back to the default currency.
+  const { user } = useContext(UserContext) || {};
   const [type, setType] = useState("expense");
   const [amount, setAmount] = useState("");
   const [category, setCategory] = useState("");
@@ -212,6 +216,7 @@ export default function AddTransactionDrawer({
           date: new Date(date + "T12:00:00"),
           description,
           excludeFromBudget,
+          currency: user?.currency === "INR" ? "INR" : "USD",
         }),
       });
 

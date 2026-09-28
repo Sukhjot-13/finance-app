@@ -1,6 +1,6 @@
 // src/app/api/auth/logout/route.js
 import { cookies } from "next/headers";
-import { sendSuccess, sendError } from "@/lib/server-utils";
+import { sendSuccess } from "@/lib/server-utils";
 import { verifyToken, hashToken } from "@/lib/auth";
 import User from "@/models/user.model";
 import dbConnect from "@/lib/mongodb";
@@ -31,21 +31,25 @@ export async function POST(req) {
       }
     }
   } catch (error) {
-    // Honest failure: the server-side session may still be live, so report
-    // a 500 — but still clear this device's cookies so the local logout
-    // always takes effect here (mirrors logout-all's contract).
-    console.error("Logout error:", error.message);
+    // The client cookie IS cleared on every path, so a 500 here would be a
+    // lie about the client's own state AND left the shell unusable (every
+    // subsequent /api/user is 401). Instead the response is 200 with an
+    // explicit `revoked: false` + machine-readable code: this device is out,
+    // but the server-side session may still be live on OTHER devices.
+    console.error("Logout error:", error?.message);
     cookieStore.delete("accessToken");
     cookieStore.delete("refreshToken");
-    return sendError(
-      "Could not complete server-side logout. This device was logged out locally — please log in and use 'Log Out From All Devices' if this is a shared device.",
-      500
-    );
+    return sendSuccess({
+      message:
+        "Signed out on this device, but the server could not end your session. Other devices may still be signed in.",
+      revoked: false,
+      code: "SERVER_REVOKE_FAILED",
+    });
   }
 
   // Clear the cookies on the client side regardless
   cookieStore.delete("accessToken");
   cookieStore.delete("refreshToken");
 
-  return sendSuccess({ message: "Logged out successfully" });
+  return sendSuccess({ message: "Logged out successfully", revoked: true });
 }

@@ -25,6 +25,68 @@ describe("Transaction schema", () => {
     expect(t.validateSync()?.errors.amount).toBeDefined();
   });
 
+  it("rejects NON-FINITE amounts (the Infinity poison vector)", () => {
+    // `amount > 0` is TRUE for Infinity, so the range check alone let a single
+    // "Infinity" row through and made every aggregate for that user ±Infinity
+    // permanently.
+    for (const amount of [Infinity, -Infinity, NaN, 1e400]) {
+      const t = new Transaction({
+        userId: "64b64b64b64b64b64b64b64b",
+        type: "expense",
+        amount,
+        amountMinor: Number.isFinite(amount) ? Math.round(amount * 100) : 1,
+        category: "Food",
+        date: new Date(),
+      });
+      expect(t.validateSync()?.errors.amount).toBeDefined();
+    }
+  });
+
+  it("requires POSITIVE INTEGER amountMinor (money is stored in minor units)", () => {
+    const base = {
+      userId: "64b64b64b64b64b64b64b64b",
+      type: "expense",
+      amount: 10,
+      category: "Food",
+      date: new Date(),
+    };
+    for (const amountMinor of [undefined, 0, -5, 10.5]) {
+      const t = new Transaction({ ...base, amountMinor });
+      expect(t.validateSync()?.errors.amountMinor).toBeDefined();
+    }
+    const ok = new Transaction({ ...base, amountMinor: 1000 });
+    expect(ok.validateSync()).toBeUndefined();
+  });
+
+  it("defaults currency to USD and restricts it to the supported list", () => {
+    const t = new Transaction({
+      type: "expense", amount: 1, amountMinor: 100, category: "Other",
+    });
+    expect(t.currency).toBe("USD");
+    const bad = new Transaction({
+      type: "expense", amount: 1, amountMinor: 100, category: "Other", currency: "GBP",
+    });
+    expect(bad.validateSync()?.errors.currency).toBeDefined();
+  });
+
+  it("declares the unique sparse (recurringRuleId, scheduledFor) index", () => {
+    const specs = Transaction.schema.indexes().map(([spec, opts]) => ({ spec, opts }));
+    const rec = specs.find(
+      (i) => i.spec.recurringRuleId === 1 && i.spec.scheduledFor === 1
+    );
+    expect(rec).toBeDefined();
+    expect(rec.opts).toMatchObject({ unique: true, sparse: true });
+  });
+
+  it("carries recurringRuleId + scheduledFor (materialization idempotency key)", () => {
+    const t = new Transaction({
+      type: "expense", amount: 10, amountMinor: 1000, category: "Rent",
+    });
+    // Absent by default so the sparse index exempts hand-created rows.
+    expect(t.recurringRuleId).toBeNull();
+    expect(t.scheduledFor).toBeNull();
+  });
+
   it("rejects an invalid type", () => {
     const t = new Transaction({
       userId: "64b64b64b64b64b64b64b64b",

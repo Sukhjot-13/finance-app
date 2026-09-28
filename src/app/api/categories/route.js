@@ -4,6 +4,7 @@ import dbConnect from "@/lib/mongodb";
 import Category from "@/models/category.model";
 import { verifySession } from "@/lib/auth";
 import { defaultExpenseCategories, defaultIncomeCategories } from "@/lib/constants";
+import { isReservedCategoryName, RESERVED_CATEGORY_NAMES } from "@/lib/money";
 
 // GET all categories for the user (defaults + custom)
 export async function GET(request) {
@@ -56,7 +57,14 @@ export async function POST(request) {
         { status: 400 }
       );
     }
-    const { name, type } = body || {};
+    // A literal `null` body parses to null without throwing.
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+      return NextResponse.json(
+        { message: "Invalid request body" },
+        { status: 400 }
+      );
+    }
+    const { name, type } = body;
 
     if (!name || typeof name !== "string" || !name.trim() || !type) {
       return NextResponse.json(
@@ -75,6 +83,13 @@ export async function POST(request) {
     if (name.trim().length > 50) {
       return NextResponse.json(
         { message: "Category name cannot exceed 50 characters" },
+        { status: 400 }
+      );
+    }
+
+    if (isReservedCategoryName(name)) {
+      return NextResponse.json(
+        { message: "That category name is reserved. Please choose another." },
         { status: 400 }
       );
     }

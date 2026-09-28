@@ -3,6 +3,7 @@ import dbConnect from "@/lib/mongodb";
 import Transaction from "@/models/transaction.model";
 import { verifySession } from "@/lib/auth";
 import { NextResponse } from "next/server";
+import { coerceAmount, toMinorUnits } from "@/lib/money";
 
 // Escapes user input so it's always treated literally in $regex filters.
 function escapeRegex(value) {
@@ -93,7 +94,7 @@ export async function GET(req) {
       { status: 200 }
     );
   } catch (error) {
-    console.error("GET transactions error:", error);
+    console.error("GET transactions error:", error?.message);
     return NextResponse.json({ message: "Server error" }, { status: 500 });
   }
 }
@@ -116,7 +117,7 @@ export async function POST(req) {
         { status: 400 }
       );
     }
-    if (!body || typeof body !== "object") {
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
       return NextResponse.json(
         { message: "Invalid request body" },
         { status: 400 }
@@ -133,7 +134,11 @@ export async function POST(req) {
       );
     }
     
-    if (!amount || isNaN(amount) || amount <= 0) {
+    // Number.isFinite (not `isNaN`) is the guard: `isNaN("Infinity")` and
+    // `isNaN("1e400")` are both FALSE and the strings then compare > 0, so a
+    // single such row made every aggregate for the user ±Infinity forever.
+    const amountNum = coerceAmount(amount);
+    if (amountNum === null) {
       return NextResponse.json(
         { message: "Amount must be a positive number" },
         { status: 400 }
@@ -160,6 +165,13 @@ export async function POST(req) {
         { status: 400 }
       );
     }
+
+    if (body.currency !== undefined && body.currency !== "USD" && body.currency !== "INR") {
+      return NextResponse.json(
+        { message: "Currency must be USD or INR" },
+        { status: 400 }
+      );
+    }
     
     // Sanitize inputs
     // Store the date exactly as the client sent it. The client sends an ISO
@@ -174,7 +186,9 @@ export async function POST(req) {
 
     const sanitizedData = {
       type,
-      amount: parseFloat(amount),
+      amount: amountNum,
+      amountMinor: toMinorUnits(amountNum),
+      currency: body.currency === "INR" ? "INR" : "USD",
       category: category.trim(),
       date: userDate,
       description: description ? description.trim() : '',
@@ -188,7 +202,7 @@ export async function POST(req) {
     await transaction.save();
     return NextResponse.json(transaction, { status: 201 });
   } catch (error) {
-    console.error("POST transaction error:", error);
+    console.error("POST transaction error:", error?.message);
     
     if (error.name === 'ValidationError') {
       return NextResponse.json(
