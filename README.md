@@ -99,7 +99,7 @@ integration is a set of no-ops, so local development, CI and previews are unaffe
 
 | Variable | Required for | Value |
 |---|---|---|
-| `MANAGER_ENDPOINT` | logs + analytics | base URL of the Manager deployment |
+| `MANAGER_ENDPOINT` | logs + analytics | base URL of the **Manager** deployment — not this app's own port |
 | `MANAGER_APP_ID` | logs + analytics | project slug in Manager |
 | `MANAGER_LOG_KEY` | server logs | `mlk_…` server key |
 | `MANAGER_ANALYTICS_KEY` | analytics | `mak_…` |
@@ -114,6 +114,10 @@ only inlines `NEXT_PUBLIC_*` into the client bundle — `process.env` in browser
 an empty object, so reading the `MANAGER_*` values from a `"use client"` module always
 yields nothing and the browser logger never starts. Use the project's **client** key
 (`mck_…`) there: Manager derives each entry's `source` from the key kind.
+
+`MANAGER_ENDPOINT` is Manager's own base URL (`http://127.0.0.1:3300` for a local Manager).
+It is easy to get backwards and point it at this app's dev port, which makes every log
+POST fail silently.
 
 What gets wired up:
 
@@ -147,13 +151,36 @@ It posts one log and one event through the real endpoints, asserts the right key
 are accepted and the wrong ones are refused, then hits this app's own
 `POST /api/auth/refresh` error path.
 
+### Delivery tuning
+
+Server logs do **not** flush on every write. `src/lib/manager/index.js` sets the SDK's
+`flushIntervalMs` to 250ms, so a burst of N log lines becomes one HTTP request instead of
+N. The window is deliberately short: serverless runtimes can freeze timers after a
+response is sent, which would strand anything still sitting in the batch.
+
+`error` and `fatal` skip the window with a leading-edge flush — sent immediately, but no
+more than once per 100ms, with a trailing flush so a burst of 50 errors costs ~2 requests
+rather than 50.
+
+Measured with `node scripts/measure-log-delivery.mjs 200` (200 entries, one in ten at
+`error`):
+
+```
+ingest requests    : 11
+entries delivered  : 201      (200 + manager_logger_started)
+entries/request    : 18.3
+sdk dropped       : 0
+```
+
+`getManagerDroppedCount()` reports entries this client discarded (its own rate limit or
+queue overflow). The SDK raises the same condition as a `warn` entry named
+`manager_sdk_dropped_entries`, so client-side loss shows up in the log viewer instead of
+vanishing.
+
 Notes:
 
 - On the iOS (Capacitor) build, `NEXT_PUBLIC_MANAGER_ENDPOINT` must be a host the phone
   can actually reach — `127.0.0.1` on a device is the device itself, not your machine.
-- Server logs flush on every write, not on the SDK's 5-second timer: serverless
-  runtimes can freeze timers after a response is sent, which would silently drop
-  entries.
 - Process-level `uncaughtException` capture is intentionally **off**; Next.js owns
   process error handling. Report errors from your error boundary instead.
 - The integration never throws into a request: if Manager is unreachable, the app

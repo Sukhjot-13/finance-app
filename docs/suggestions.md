@@ -46,6 +46,14 @@ reserved names in `POST`/`PUT /api/categories`.
 
 ## 🟢 Improvements
 
+### Manager log delivery: batch instead of one request per line (2026-09-28)
+
+Flushing on every write defeated the SDK's batching (96/200 delivered, 105 dropped,
+4.8 entries/request). Routine levels now ride a 250ms `flushIntervalMs` window and
+`error`/`fatal` use a leading-edge flush with a 100ms minimum gap: 201/200 delivered,
+0 dropped, 18.3 entries/request. Measured with
+`node scripts/measure-log-delivery.mjs 200`.
+
 ### CSV injection via bare CR in the export (2026-09-28)
 
 `toCsvRow` only quoted on `/[",\n]/` and `sanitizeCsvCell`'s prefix guard only

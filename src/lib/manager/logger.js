@@ -93,6 +93,17 @@
  * 6. NO SDK? PLAIN HTTP
  * ---------------------------------------------------------------------------
  *
+ *   Delivery tuning (optional, usually right for a server):
+ *     flushIntervalMs: 250    // batch window; lower = fresher, more requests
+ *     maxLogsPerSecond: 500   // self-protection ceiling; the server enforces the real limit
+ *   Both defaults are sized for server code. A burst of N lines becomes ONE request per
+ *   batch window, not one per line, and anything this client had to drop is reported as a
+ *   warn entry named manager_sdk_dropped_entries instead of vanishing.
+ *
+ * ---------------------------------------------------------------------------
+ * 7. PLAIN HTTP EQUIVALENT
+ * ---------------------------------------------------------------------------
+ *
  *   POST https://<your-manager-host>/api/ingest/logs
  *   headers: content-type: application/json
  *            x-api-key: <project-key>
@@ -115,7 +126,16 @@ const ERROR_LEVELS = ["error", "fatal"];
 const ALWAYS_KEPT = ["error", "fatal"];
 const FLUSH_INTERVAL_MS = 5000;
 const MAX_BATCH_SIZE = 20;
-const MAX_LOGS_PER_SECOND = 50;
+/**
+ * Self-protection ceiling, per client process.
+ *
+ * This is a runaway guard, not the real limit: the ingest endpoint enforces the
+ * authoritative per-key rate limit, and repeated errors collapse by fingerprint. A 50/s
+ * cap silently threw away most of a busy server's output, so the default is generous and
+ * anything dropped is reported (see reportDrops) rather than vanishing.
+ */
+const MAX_LOGS_PER_SECOND = 500;
+const DROP_REPORT_EVERY = 250;
 const MAX_QUEUE_SIZE = 200;
 const MAX_MESSAGE_CHARS = 1024;
 const MAX_STACK_CHARS = 8000;
@@ -401,10 +421,41 @@ function takeTokens(state) {
     state.lastRefill = now;
     if (state.tokens < 1) {
         state.dropped += 1;
+        reportDrops(state, "rate_limited");
         return false;
     }
     state.tokens -= 1;
     return true;
+}
+/**
+ * Surfaces silently-discarded entries as a single warn-level entry, so a client that
+ * outran its own ceiling is visible in the log viewer instead of quietly losing data.
+ * Reports at most once per DROP_REPORT_EVERY drops and never recurses.
+ */
+function reportDrops(state, reason) {
+    if (transportDepth > 0) {
+        return;
+    }
+    if (state.dropped < DROP_REPORT_EVERY) {
+        return;
+    }
+    if (state.reportedDrops >= state.dropped) {
+        return;
+    }
+    const since = state.dropped - state.reportedDrops;
+    state.reportedDrops = state.dropped;
+    const entry = buildEntry(state, rootBindings(state), "warn", "manager_sdk_dropped_entries", { dropped: since, totalDropped: state.dropped, reason }, "", undefined);
+    transportDepth += 1;
+    try {
+        state.queue.push(entry);
+        void flush(state, {});
+    }
+    catch {
+        /* never throw from the drop reporter */
+    }
+    finally {
+        transportDepth -= 1;
+    }
 }
 function shouldSample(state, level) {
     if (ALWAYS_KEPT.includes(level)) {
@@ -724,6 +775,7 @@ function enqueue(state, entry) {
     if (state.queue.length > state.config.maxQueueSize) {
         state.queue = state.queue.slice(-state.config.maxQueueSize);
         state.dropped += 1;
+        reportDrops(state, "queue_overflow");
     }
     if (state.queue.length >= state.config.maxBatchSize) {
         void flush(state, {});
@@ -1148,6 +1200,7 @@ function createState(options) {
         tokens: config.maxLogsPerSecond,
         lastRefill: Date.now(),
         dropped: 0,
+        reportedDrops: 0,
         attempt: 0,
         flushTimer: null,
         retryTimer: null,

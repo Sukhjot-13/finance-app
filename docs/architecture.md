@@ -391,7 +391,7 @@ Define all of these in a `.env.local` file at the project root.
 | `JWT_SECRET` | Reserved/unused — no `src/` references (grep 2026-09-26); kept in README template only | — |
 | `NODE_ENV` | Environment mode (`development` adds `'unsafe-eval'` to CSP script-src; controls cookie `secure` flags; `SimpleChart` dev-only error detail) | `src/proxy.js`, auth routes (`refresh`, `otp/verify`), `src/components/SimpleChart.js` |
 | `CAPACITOR_SERVER_URL` | (Optional) Overrides the target URL loaded by the iOS app (defaults to `https://fintrack.vistaenvision.com`) | `capacitor.config.ts` |
-| `MANAGER_ENDPOINT` | (Optional) Base URL of the Manager deployment. All three of endpoint + app id + log key are required before the integration enables itself. | `src/lib/manager/index.js` → `managerConfig` |
+| `MANAGER_ENDPOINT` | (Optional) Base URL of the **Manager** deployment (its own port, e.g. `http://127.0.0.1:3300` — not this app's dev port). All three of endpoint + app id + log key are required before the integration enables itself. | `src/lib/manager/index.js` → `managerConfig` |
 | `MANAGER_APP_ID` | (Optional) Project slug in Manager (`finance-app`). | `src/lib/manager/index.js` → `managerConfig` |
 | `MANAGER_LOG_KEY` | (Optional) Project **server** log key (`mlk_…`). | `src/lib/manager/index.js` → `managerConfig` |
 | `MANAGER_ANALYTICS_KEY` | (Optional) Analytics key (`mak_…`) for the injected tracker `<script>`. | `src/lib/manager/index.js` → `managerConfig` |
@@ -439,12 +439,31 @@ to it. No app-wide logging layer was invented, and no `console.*` output was cha
 | File | Purpose | Exports |
 |---|---|---|
 | `src/lib/manager/logger.js` | The vendored `@manager/logger` SDK: single file, zero dependencies, refreshed with `curl -H "x-manager-key: …" "…/api/sdk/logger?format=js"` | `initLogger`, `traceIdFromHeaders`, `shutdownLoggers`, `fingerprint`, `LOG_SDK_VERSION`, `LOG_SDK_PATH`, `TRACE_HEADER` |
-| `src/lib/manager/index.js` | Integration facade. Reads the server `MANAGER_*` env, exposes a no-op logger when unconfigured, creates the real logger lazily on first use and caches it on `globalThis` so every module instance shares one queue, and flushes on every write (serverless can freeze timers). Separately exposes `managerClientConfig`, built from the `NEXT_PUBLIC_MANAGER_*` block, because Next.js strips non-public env from the client bundle. Never throws. | `managerConfig`, `managerClientConfig`, `startManagerLogger`, `getManagerLogger`, `managerLog`, `logServerEvent`, `logServerError`, `managerTrackerScript` |
+| `src/lib/manager/index.js` | Integration facade. Reads the server `MANAGER_*` env, exposes a no-op logger when unconfigured, creates the real logger lazily on first use and caches it on `globalThis` so every module instance shares one queue, batches routine levels on a 250ms window and leading-edge-flushes `error`/`fatal`. Separately exposes `managerClientConfig`, built from the `NEXT_PUBLIC_MANAGER_*` block, because Next.js strips non-public env from the client bundle. Never throws. | `managerConfig`, `managerClientConfig`, `startManagerLogger`, `getManagerLogger`, `managerLog`, `getManagerDroppedCount`, `logServerEvent`, `logServerError`, `managerTrackerScript` |
 | `src/lib/manager/ManagerProvider.jsx` | Client component mounted in `src/app/layout.js`: starts the browser logger and injects the analytics `<script>` once, guarded against double injection. Gated on `managerClientConfig.enabled`, not `managerConfig.enabled`. | `ManagerProvider` (default) |
 | `src/proxy.js` (modified) | `buildCsp` appends `NEXT_PUBLIC_MANAGER_ENDPOINT` to `connect-src` when set. Unset ⇒ byte-identical policy. | `buildCsp`, `proxy` |
 | `src/app/api/**/route.js` (17 files, 39 sites) | Each existing `console.error` / `console.warn` in an API error path is followed by `logServerError(...)` / `managerLog("warn", ...)` carrying the same message plus a `route` tag. Additive only. | — |
 | `scripts/check-manager-integration.mjs` | `npm run manager:check` — live check against a running Manager (key kinds, rejection paths, this app's own refresh error path) | — |
-| `test/suites/manager-integration.suite.js` | 13 tests: disabled-when-unconfigured no-ops, enablement rules, blank values, server/client config split, tracker tag construction, flush-on-write, unknown-level fallback, shared `globalThis` instance, real SDK surface. Registered in `test/run-all.test.js`, the repo's single test entry point. | — |
+| `scripts/measure-log-delivery.mjs` | `node scripts/measure-log-delivery.mjs [count]` — fires N entries at the facade and reports ingest requests, entries delivered, entries/request and SDK drops. Imports the facade directly, which is why the SDK specifier is an explicit `./logger.js`. | — |
+| `test/suites/manager-integration.suite.js` | 14 tests: disabled-when-unconfigured no-ops, enablement rules, blank values, server/client config split, tracker tag construction, batching + leading-edge flush, drop-count accessor, unknown-level fallback, shared `globalThis` instance, real SDK surface. Registered in `test/run-all.test.js`, the repo's single test entry point. | — |
+
+### Delivery profile
+
+`managerLog` no longer flushes on every write. Flushing per entry turned the SDK's batch
+into one HTTP request per line: measured 96/200 delivered, 105 dropped, 20 requests,
+4.8 entries/request. The current shape measures 201/200 delivered, 0 dropped, 11 requests,
+18.3 entries/request (`scripts/measure-log-delivery.mjs 200`).
+
+- `FLUSH_INTERVAL_MS = 250` is passed to the SDK as `flushIntervalMs`, so the SDK's own
+  timer does the batching. It is short on purpose — a serverless runtime can freeze timers
+  once the response is sent, so the SDK's 5s default could delay or strand entries.
+- `IMMEDIATE_LEVELS = {error, fatal}` skip the window via `scheduleUrgentFlush()`
+  (leading edge): flush now if `URGENT_FLUSH_MIN_GAP_MS` (100ms) has passed, otherwise
+  arm one trailing flush, so a burst of 50 errors costs ~2 requests, not 50.
+- `getManagerDroppedCount()` reads the SDK's `droppedCount()` for health checks. The
+  re-vendored SDK raises its own discards as a `warn` entry `manager_sdk_dropped_entries`
+  and raised `maxLogsPerSecond` from 50 to 500; a 50/s self-ceiling silently discarded most
+  of a busy server's output.
 
 ### Design notes
 
@@ -454,9 +473,8 @@ to it. No app-wide logging layer was invented, and no `console.*` output was cha
   the object a request sees.
 - `captureProcessErrors` is intentionally **off** — Next.js owns process error handling
   and extra process listeners stop delivery.
-- Server logs flush on every write instead of relying on the SDK's 5s timer: a
-  serverless runtime can freeze timers once the response is sent, silently dropping
-  the batch.
+- The SDK import is an explicit `./logger.js` so the facade also loads in plain Node
+  (`scripts/measure-log-delivery.mjs`), not only under the bundler.
 - Coverage is the server API error paths. Client-side `console.error` in components and
   pages is not fanned out server-side — the browser SDK captures it instead via
   `captureConsole`.

@@ -24,7 +24,7 @@
  *
  * See README.md § "Manager integration" for the full contract.
  */
-import { initLogger } from "./logger";
+import { initLogger } from "./logger.js";
 
 const SOURCE = process.env.MANAGER_LOG_SOURCE === "client" ? "client" : "server";
 
@@ -88,6 +88,7 @@ const NOOP_LOGGER = {
   time: noop,
   timeEnd: () => 0,
   flush: async () => {},
+  droppedCount: () => 0,
   setContext: noop,
   withTrace: () => NOOP_LOGGER,
   newTrace: () => "",
@@ -95,6 +96,27 @@ const NOOP_LOGGER = {
 
 const GLOBAL_KEY = "__managerServerLogger";
 const scope = globalThis;
+
+/**
+ * Batch window for routine entries. The SDK's own timer does the batching, so a burst of
+ * N log lines becomes one HTTP request instead of N.
+ *
+ * It is short on purpose: serverless runtimes can freeze timers once a response is sent,
+ * so a 5s default could delay (or strand) entries created during a request.
+ */
+const FLUSH_INTERVAL_MS = 250;
+
+/** Levels that must never wait for the batch window. */
+const IMMEDIATE_LEVELS = new Set(["error", "fatal"]);
+
+/**
+ * Minimum gap between two urgent flushes. A burst of 50 errors costs one request now and
+ * one at the end of the window, not 50.
+ */
+const URGENT_FLUSH_MIN_GAP_MS = 100;
+
+let lastUrgentFlushAt = 0;
+let urgentTimer = null;
 
 /**
  * The logger is created lazily, on first use, and cached on globalThis.
@@ -106,7 +128,8 @@ const scope = globalThis;
  *  - a Next.js server (and Vercel functions in particular) can freeze timers once a
  *    response is sent, so a logger that only relies on its background flush timer can
  *    lose entries created outside a request.
- * Creating it on demand inside the request and flushing on every write avoids both.
+ * Creating it on demand inside the request — with a 250ms batch window and a
+ * leading-edge flush for error/fatal — avoids both.
  */
 function cachedLogger() {
   return scope[GLOBAL_KEY] ?? null;
@@ -146,6 +169,7 @@ export function startManagerLogger() {
         "cvv",
       ],
       sampleRate: process.env.NODE_ENV === "production" ? { debug: 0.1, trace: 0 } : {},
+      flushIntervalMs: FLUSH_INTERVAL_MS,
     });
     scope[GLOBAL_KEY] = logger;
     logger.info("manager_logger_started", { source: "server" });
@@ -162,12 +186,11 @@ export function getManagerLogger() {
 }
 
 /**
- * Emits a server log and flushes immediately.
+ * Emits a server log.
  *
- * The SDK batches on a 5s timer, but serverless runtimes (Vercel functions) may freeze
- * timers once the response is sent, which silently drops the batch. Flushing after each
- * entry keeps delivery guaranteed; the SDK still batches internally, so bursts collapse.
- * Fire-and-forget: never await, never throw.
+ * Routine levels ride the SDK's 250ms batch window (one request per burst, not per line).
+ * error/fatal flush straight away so a crash right after logging cannot strand the entry.
+ * Fire-and-forget: never awaits, never throws.
  */
 export function managerLog(level, message, meta = {}) {
   if (!managerConfig.enabled) return;
@@ -175,13 +198,44 @@ export function managerLog(level, message, meta = {}) {
     const log = getManagerLogger();
     const fn = typeof log[level] === "function" ? log[level] : log.info;
     fn.call(log, message, meta);
-    const flushed = log.flush();
-    if (flushed && typeof flushed.catch === "function") {
-      flushed.catch(() => {});
+    if (IMMEDIATE_LEVELS.has(level)) {
+      scheduleUrgentFlush(log);
     }
   } catch {
     /* observability must never throw */
   }
+}
+
+/**
+ * Leading-edge flush: send now if the last urgent send was long enough ago, otherwise
+ * schedule one for the end of the gap so nothing is stranded.
+ */
+function scheduleUrgentFlush(log) {
+  const send = () => {
+    urgentTimer = null;
+    lastUrgentFlushAt = Date.now();
+    const flushed = log.flush();
+    if (flushed && typeof flushed.catch === "function") {
+      flushed.catch(() => {});
+    }
+  };
+  const elapsed = Date.now() - lastUrgentFlushAt;
+  if (elapsed >= URGENT_FLUSH_MIN_GAP_MS) {
+    send();
+    return;
+  }
+  if (urgentTimer === null) {
+    urgentTimer = setTimeout(send, URGENT_FLUSH_MIN_GAP_MS - elapsed);
+    if (typeof urgentTimer.unref === "function") {
+      urgentTimer.unref();
+    }
+  }
+}
+
+/** How many entries this client discarded (rate limit / queue overflow). */
+export function getManagerDroppedCount() {
+  const log = cachedLogger();
+  return log !== null && typeof log.droppedCount === "function" ? log.droppedCount() : 0;
 }
 
 /** Records an API route outcome. Call from route handlers and server actions. */
