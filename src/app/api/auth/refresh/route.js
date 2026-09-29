@@ -21,9 +21,9 @@ import {
   purgeExpiredRefreshTokens,
   REFRESH_ROTATION_GRACE_MS,
 } from "@/lib/auth";
-import { logServerError, managerLog } from "@/lib/manager";
+import { logServerError, managerLog, withManagerLogs } from "@/lib/manager/server";
 
-export async function POST() {
+async function handlePOST() {
   const cookieStore = await cookies();
   const rawToken = await cookieStore.get("refreshToken")?.value;
 
@@ -202,3 +202,8 @@ export async function POST() {
     return sendError("Could not refresh session. Please try again.", 500);
   }
 }
+
+// Every verb below is wrapped so the request gets a trace-scoped child
+// logger, a completion entry with the status it actually produced, and a
+// flush scheduled with `after()` once the response completes.
+export const POST = withManagerLogs(handlePOST);

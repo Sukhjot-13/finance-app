@@ -4,7 +4,7 @@ import Transaction from "@/models/transaction.model";
 import { verifySession } from "@/lib/auth";
 import { NextResponse } from "next/server";
 import { coerceAmount, toMinorUnits } from "@/lib/money";
-import { logServerError } from "@/lib/manager";
+import { logServerError, withManagerLogs } from "@/lib/manager/server";
 
 // Escapes user input so it's always treated literally in $regex filters.
 function escapeRegex(value) {
@@ -23,7 +23,7 @@ function parseInstant(value) {
 //   type ("income"|"expense"), category, search (description/category)
 //   from / to (absolute instants bounding the transaction date)
 // Response shape: { transactions, total, page, pageSize, totalPages }
-export async function GET(req) {
+async function handleGET(req) {
   try {
     // Full session check so server-side revocation applies here too
     const { user, status } = await verifySession();
@@ -102,7 +102,7 @@ export async function GET(req) {
 }
 
 // POST a new transaction
-export async function POST(req) {
+async function handlePOST(req) {
   try {
     const { user, status } = await verifySession();
     if (!user) {
@@ -220,3 +220,9 @@ export async function POST(req) {
     );
   }
 }
+
+// Every verb below is wrapped so the request gets a trace-scoped child
+// logger, a completion entry with the status it actually produced, and a
+// flush scheduled with `after()` once the response completes.
+export const GET = withManagerLogs(handleGET);
+export const POST = withManagerLogs(handlePOST);

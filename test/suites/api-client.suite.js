@@ -9,6 +9,7 @@ const jsonResponse = (status, body = {}) =>
 
 describe("api() wrapper", () => {
   let originalWindow;
+  let originalFetch;
 
   beforeEach(() => {
     vi.resetModules();
@@ -16,12 +17,17 @@ describe("api() wrapper", () => {
     // real one afterwards (jsdom's window must survive for later suites).
     originalWindow = global.window;
     global.window = { location: { href: "" } };
+    // The real global fetch must be put back afterwards, not merely removed.
+    // `delete global.fetch` left the process with NO fetch at all, so every
+    // later suite (including the Manager SDK transport tests) silently saw an
+    // undefined globalThis.fetch and delivered nothing.
+    originalFetch = global.fetch;
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
     global.window = originalWindow;
-    delete global.fetch;
+    global.fetch = originalFetch;
   });
 
   const loadApi = async () => (await vi.importActual("@/lib/api")).default;

@@ -5,7 +5,7 @@ import Transaction from "@/models/transaction.model";
 import { verifySession } from "@/lib/auth";
 import { NextResponse } from "next/server";
 import { fromMinorUnits } from "@/lib/money";
-import { logServerError } from "@/lib/manager";
+import { logServerError, withManagerLogs } from "@/lib/manager/server";
 
 // Max rows per export — a full-history dump must not hammer the tier.
 const MAX_ROWS = 10000;
@@ -42,7 +42,7 @@ export function toCsvRow(cells) {
     .join(",");
 }
 
-export async function GET(req) {
+async function handleGET(req) {
   const { user, status } = await verifySession();
   if (!user) {
     return NextResponse.json({ message: "Unauthorized" }, { status: status || 401 });
@@ -117,3 +117,8 @@ export async function GET(req) {
     return NextResponse.json({ message: "Failed to export transactions." }, { status: 500 });
   }
 }
+
+// Every verb below is wrapped so the request gets a trace-scoped child
+// logger, a completion entry with the status it actually produced, and a
+// flush scheduled with `after()` once the response completes.
+export const GET = withManagerLogs(handleGET);

@@ -42,11 +42,98 @@ category's spending **disappeared from a financial report**. **Fixed** with
 `$0` spend no longer falls through to a prototype lookup), and rejection of
 reserved names in `POST`/`PUT /api/categories`.
 
+### Only the FIRST manual transaction ever succeeded (2026-09-29) — **found and fixed**
+
+`Transaction.recurringRuleId` / `scheduledFor` were declared `default: null`, and
+the materialization guard is a **unique sparse** index on `{recurringRuleId, scheduledFor}`.
+A MongoDB sparse index skips documents where the indexed field is **absent** — an
+explicit `null` is a value and *is* indexed. So every hand-created transaction stored
+`(null, null)`, and the second one **in the entire collection** failed with
+`E11000 duplicate key … recurringRuleId_1_scheduledFor_1`, surfacing to the user as
+`500 {"message":"Failed to create transaction"}`.
+
+The unit tests never saw it because the model registry is mocked, so nothing ever hit
+a real index; it only appeared when the flow was exercised against a real database.
+
+**Fixed** by removing `default: null` so ordinary rows omit the fields, which works on
+already-provisioned databases because it only changes documents written from now on.
+Regression-tested in `test/suites/models.suite.js`.
+
+**Follow-up worth doing:** a *partial* index
+(`partialFilterExpression: { recurringRuleId: { $type: "objectId" } }`) expresses the
+intent directly and is immune to this whole class of bug. It cannot simply be added,
+because MongoDB refuses an index whose key pattern already exists with different
+options — the stale sparse index must be dropped first, which is a production
+migration, not a code change:
+
+```js
+db.transactions.dropIndex("recurringRuleId_1_scheduledFor_1");
+db.transactions.createIndex(
+  { recurringRuleId: 1, scheduledFor: 1 },
+  { unique: true, partialFilterExpression: { recurringRuleId: { $type: "objectId" } } }
+);
+```
+
+The existing `(null, null)` entries stay in the sparse index until that drop runs; they
+are harmless but waste index space.
+
+### The vendored Manager SDK was a stale, hand-patched fork (2026-09-29) — **found and fixed**
+
+`src/lib/manager/logger.js` had drifted from the SDK Manager serves, missing six
+upstream fixes — every one of which was a real defect in this app:
+
+| Upstream fix | What was broken here |
+|---|---|
+| `stackOf` accepts any object with a `stack` string | every already-serialized error lost its stack |
+| stacks are redacted and length-capped | stacks shipped unredacted and unbounded |
+| the stack is also lifted from `meta.error` | `log.error("x", { error })` produced no top-level stack |
+| the fetch wrapper only suppresses interception while *invoking* its own transport | every unrelated console error and app fetch during an upload was silently lost |
+| the dedupe key includes `traceId` | identical errors on different traces collapsed into one, destroying correlation |
+| dedupe also requires the entry to still be queued | a flushed entry could be "grouped" again |
+
+Plus a `sameOrigin` check and a defensive copy of the caller's `init`, so `x-trace-id`
+was being added to **third-party** requests (forcing CORS preflights) and the caller's
+options object was being mutated.
+
+**Fixed** by re-downloading the SDK through the `x-manager-key` header. The README
+documents the refresh command, and `test/suites/manager-config.suite.js` now asserts the
+upstream fixes are present so a hand-patch or a stale copy fails in CI.
+
+### Server logs were only ever delivered by luck (2026-09-29) — **found and fixed**
+
+The previous integration had no `after()` flush. Routine levels rode a 250ms SDK timer,
+and `error`/`fatal` used a leading-edge flush with a 100ms minimum gap. On a serverless
+runtime, where timers are frozen once the response is sent, that means routine
+`info` entries — including the per-request completion record — were delivered only when
+the process happened to stay warm. Log methods enqueue, so `await log.error()` does not
+flush either.
+
+**Fixed**: every route verb is wrapped in `withManagerLogs(...)`, which schedules
+`after(() => root.flush())` on **every** exit (success, early return, throw), records
+the status the handler actually produced, and adopts the browser's `x-trace-id` on a
+request-local child logger. `after()` is the supported mechanism; a timer alone is not.
+
+### The browser logger and analytics shared one guard (2026-09-29) — **found and fixed**
+
+`ManagerProvider` returned early unless browser *logging* was configured, so a
+deployment with only a `mak_` analytics key — the common case for a public site — never
+loaded the tracker at all. It also created a new `initLogger` instance on every mount
+(no `window` cache), so Strict Mode, Fast Refresh or a second provider install would
+duplicate every console listener, every global error handler and every upload.
+
+**Fixed**: the two channels are gated separately (`logsEnabled` vs the analytics key),
+the logger is cached on `window.__managerClientLogger`, and the tracker tag is
+deduplicated by `id`.
+
 ---
 
 ## 🟢 Improvements
 
 ### Manager log delivery: batch instead of one request per line (2026-09-28)
+
+*(Superseded 2026-09-29: the leading-edge flush this describes was replaced by
+`after()`-scheduled request-completion flushing. The 250ms batch window is still in
+place and still correct.)*
 
 Flushing on every write defeated the SDK's batching (96/200 delivered, 105 dropped,
 4.8 entries/request). Routine levels now ride a 250ms `flushIntervalMs` window and

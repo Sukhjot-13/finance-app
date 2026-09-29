@@ -5,9 +5,25 @@
 // replaces the entire document — intentionally not used to keep styling).
 import { useEffect } from "react";
 
+// A React error boundary's error does NOT reach `window.onerror` or
+// `unhandledrejection`, so the SDK's global capture cannot see it. Reporting it
+// explicitly is the only way a render crash reaches Manager. `console.error`
+// stays as the local fallback when the browser logger is not configured.
+function reportSegmentError(label, error) {
+  console.error(label + ":", error);
+  try {
+    window.__managerClientLogger?.error("app_segment_error", {
+      boundary: label,
+      error,
+    });
+  } catch {
+    /* observability must never break the error screen */
+  }
+}
+
 export default function RootError({ error, reset }) {
   useEffect(() => {
-    console.error("App segment error:", error);
+    reportSegmentError("App segment error", error);
   }, [error]);
 
   return (

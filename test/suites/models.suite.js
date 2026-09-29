@@ -78,13 +78,30 @@ describe("Transaction schema", () => {
     expect(rec.opts).toMatchObject({ unique: true, sparse: true });
   });
 
-  it("carries recurringRuleId + scheduledFor (materialization idempotency key)", () => {
+  it("leaves the materialization key ABSENT (not null) on a hand-made row", () => {
+    // Regression: a MongoDB `sparse` index only skips documents whose indexed
+    // field is missing. An explicit `null` IS a value and IS indexed, so with
+    // `default: null` every manual transaction stored (null, null) and the
+    // unique index rejected the second one in the entire collection with
+    // E11000 — only the first manual transaction ever succeeded.
     const t = new Transaction({
       type: "expense", amount: 10, amountMinor: 1000, category: "Rent",
     });
-    // Absent by default so the sparse index exempts hand-created rows.
-    expect(t.recurringRuleId).toBeNull();
-    expect(t.scheduledFor).toBeNull();
+    expect(t.recurringRuleId).toBeUndefined();
+    expect(t.scheduledFor).toBeUndefined();
+    // A materialized occurrence still carries both, so idempotency holds.
+    const materialized = new Transaction({
+      type: "expense", amount: 10, amountMinor: 1000, category: "Rent",
+      recurringRuleId: "64b64b64b64b64b64b64b64b",
+      scheduledFor: new Date("2026-03-01T12:00:00.000Z"),
+    });
+    expect(materialized.recurringRuleId).toBeDefined();
+    expect(materialized.scheduledFor).toBeInstanceOf(Date);
+
+    // The declared defaults must stay absent, or the bug returns.
+    const path = Transaction.schema.path("recurringRuleId");
+    expect(path.defaultValue).toBeUndefined();
+    expect(Transaction.schema.path("scheduledFor").defaultValue).toBeUndefined();
   });
 
   it("rejects an invalid type", () => {

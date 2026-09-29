@@ -5,9 +5,25 @@
 // white page. Next.js excludes its own redirect/notFound errors automatically.
 import { useEffect } from "react";
 
+// A React error boundary's error does NOT reach `window.onerror` or
+// `unhandledrejection`, so the SDK's global capture cannot see it. Reporting it
+// explicitly is the only way a render crash reaches Manager. `console.error`
+// stays as the local fallback when the browser logger is not configured.
+function reportSegmentError(label, error) {
+  console.error(label + ":", error);
+  try {
+    window.__managerClientLogger?.error("app_segment_error", {
+      boundary: label,
+      error,
+    });
+  } catch {
+    /* observability must never break the error screen */
+  }
+}
+
 export default function MainError({ error, reset }) {
   useEffect(() => {
-    console.error("Main app segment error:", error);
+    reportSegmentError("Main app segment error", error);
   }, [error]);
 
   return (

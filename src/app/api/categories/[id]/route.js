@@ -7,7 +7,7 @@ import Budget from "@/models/budget.model";
 import { verifySession } from "@/lib/auth";
 import { isReservedCategoryName } from "@/lib/money";
 import mongoose from "mongoose";
-import { logServerError } from "@/lib/manager";
+import { logServerError, withManagerLogs } from "@/lib/manager/server";
 
 // PUT rename a custom category.
 // Renaming cascades: transactions AND monthly budgets are stored by plain
@@ -18,7 +18,7 @@ import { logServerError } from "@/lib/manager";
 // support) it falls back to sequential writes with best-effort rollback, so
 // a mid-cascade failure no longer leaves transactions pointing at the old
 // name while the category doc holds the new one.
-export async function PUT(request, { params }) {
+async function handlePUT(request, { params }) {
   const { user, status } = await verifySession();
   if (!user)
     return NextResponse.json(
@@ -243,7 +243,7 @@ export async function PUT(request, { params }) {
 // Transactions move to "Other" (an existing default for BOTH expense and
 // income lists); any budgets set for the deleted name are removed so no
 // progress bar references a category the user can no longer select.
-export async function DELETE(request, { params }) {
+async function handleDELETE(request, { params }) {
   const { user, status } = await verifySession();
   if (!user)
     return NextResponse.json(
@@ -314,3 +314,9 @@ export async function DELETE(request, { params }) {
     );
   }
 }
+
+// Every verb below is wrapped so the request gets a trace-scoped child
+// logger, a completion entry with the status it actually produced, and a
+// flush scheduled with `after()` once the response completes.
+export const PUT = withManagerLogs(handlePUT);
+export const DELETE = withManagerLogs(handleDELETE);

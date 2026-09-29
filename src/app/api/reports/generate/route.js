@@ -4,9 +4,9 @@ import dbConnect from "@/lib/mongodb";
 import Transaction from "@/models/transaction.model";
 import { verifySession } from "@/lib/auth";
 import { fromMinorUnits, minorOf } from "@/lib/money";
-import { logServerError } from "@/lib/manager";
+import { logServerError, withManagerLogs } from "@/lib/manager/server";
 
-export async function POST(request) {
+async function handlePOST(request) {
   const { user, status } = await verifySession();
   if (!user)
     return NextResponse.json({ message: "Not authenticated" }, { status: status || 401 });
@@ -139,3 +139,8 @@ export async function POST(request) {
     return NextResponse.json({ message: "Server error" }, { status: 500 });
   }
 }
+
+// Every verb below is wrapped so the request gets a trace-scoped child
+// logger, a completion entry with the status it actually produced, and a
+// flush scheduled with `after()` once the response completes.
+export const POST = withManagerLogs(handlePOST);

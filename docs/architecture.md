@@ -244,7 +244,7 @@ Run order and post-deploy checks: `docs/to-do.md`.
   - `RefreshTokenSchema` - `token` stores the **SHA-256 hash** of the JWT (never raw); `deviceInfo`, `ipAddress`, `createdAt`; `rotatedAt` (set when rotation supersedes the token — valid during the grace window, purged after, reuse past it = theft). TTL indexes don't work on subdocument arrays — pruning happens in code.
   - `pre("save")` hashes OTP when modified; `compareOtp()` method.
 
-- **`src/models/transaction.model.js`** - userId (indexed), type enum, amount (>0, **finite** — `v > 0` is true for `Infinity`, so finiteness is explicit and re-checked at the model layer so no write path can store a non-finite amount), **amountMinor\*** (POSITIVE INTEGER minor units; every report sums this instead of the float), **currency** (USD/INR, default USD), date, category (≤50), description (≤200), `recurringRuleId` + `scheduledFor` (materialization idempotency key; both default `null`), excludeFromBudget bool. Compound indexes `{userId,date:-1}`, `{userId,type,date:-1}` and a **unique SPARSE `{recurringRuleId:1, scheduledFor:1}`** via `.index()` (sparse so ordinary hand-created rows, which carry `(null, null)`, are exempt). `formattedAmount` virtual reads `amountMinor` when present so rendering can never inherit float drift.
+- **`src/models/transaction.model.js`** - userId (indexed), type enum, amount (>0, **finite** — `v > 0` is true for `Infinity`, so finiteness is explicit and re-checked at the model layer so no write path can store a non-finite amount), **amountMinor\*** (POSITIVE INTEGER minor units; every report sums this instead of the float), **currency** (USD/INR, default USD), date, category (≤50), description (≤200), `recurringRuleId` + `scheduledFor` (materialization idempotency key — **deliberately with NO `default: null`**), excludeFromBudget bool. Compound indexes `{userId,date:-1}`, `{userId,type,date:-1}` and a **unique SPARSE `{recurringRuleId:1, scheduledFor:1}`** via `.index()`. The sparse index exempts hand-created rows only because those rows OMIT the two fields entirely: a MongoDB sparse index skips documents where the indexed field is **absent**, and an explicit `null` is still a value and still gets indexed — with `default: null` every manual transaction stored `(null, null)` and the second one in the whole collection failed with `E11000` (see `docs/suggestions.md`, 2026-09-29). `formattedAmount` virtual reads `amountMinor` when present so rendering can never inherit float drift.
 
 - **`src/models/category.model.js`** - userId, name (required, trimmed, **maxlength 50** — matches Transaction.category cap so every custom category is assignable), type enum. Unique `{userId,name,type}`.
 
@@ -420,76 +420,141 @@ Run 3 times — one for each of `ACCESS_TOKEN_SECRET`, `REFRESH_TOKEN_SECRET`, a
 
 ### Tests
 ```bash
-npm test           # vitest — runs ALL 338 tests in one go via test/run-all.test.js
+npm test           # vitest — runs ALL 427 tests in one go via test/run-all.test.js
 npm run lint       # eslint . (clean)
-npm run manager:check  # live check against a running Manager (needs MANAGER_* env)
+npm run build      # production build
+npm run manager:check  # 21 live checks against a running Manager + FinTrack
 ```
 
 ---
 
-## Manager integration (added 2026-09-28)
+## Manager integration (added 2026-09-28; rebuilt 2026-09-29)
 
-Optional centralized logging + analytics. With no `MANAGER_*` variables every export in
-`src/lib/manager/index.js` degrades to a no-op, so local dev, CI and previews are
-unaffected. This app has **no logger of its own** — unlike ResumeBuilder, which bridged
-an existing `src/lib/logger.js` — so `src/lib/manager/index.js` is the single entry
-point and the existing `console.error` / `console.warn` calls in the API routes fan out
-to it. No app-wide logging layer was invented, and no `console.*` output was changed.
+Optional centralized logging + analytics. With no Manager variables every export
+degrades to a no-op, so local dev, CI and previews are unaffected. This app has **no
+logger of its own** — the existing `console.error` / `console.warn` calls in the API
+routes fan out to Manager, and no app-wide logging layer was invented.
 
-| File | Purpose | Exports |
-|---|---|---|
-| `src/lib/manager/logger.js` | The vendored `@manager/logger` SDK: single file, zero dependencies, refreshed with `curl -H "x-manager-key: …" "…/api/sdk/logger?format=js"` | `initLogger`, `traceIdFromHeaders`, `shutdownLoggers`, `fingerprint`, `LOG_SDK_VERSION`, `LOG_SDK_PATH`, `TRACE_HEADER` |
-| `src/lib/manager/index.js` | Integration facade. Reads the server `MANAGER_*` env, exposes a no-op logger when unconfigured, creates the real logger lazily on first use and caches it on `globalThis` so every module instance shares one queue, batches routine levels on a 250ms window and leading-edge-flushes `error`/`fatal`. Separately exposes `managerClientConfig`, built from the `NEXT_PUBLIC_MANAGER_*` block, because Next.js strips non-public env from the client bundle. Never throws. | `managerConfig`, `managerClientConfig`, `startManagerLogger`, `getManagerLogger`, `managerLog`, `getManagerDroppedCount`, `logServerEvent`, `logServerError`, `managerTrackerScript` |
-| `src/lib/manager/ManagerProvider.jsx` | Client component mounted in `src/app/layout.js`: starts the browser logger and injects the analytics `<script>` once, guarded against double injection. Gated on `managerClientConfig.enabled`, not `managerConfig.enabled`. | `ManagerProvider` (default) |
-| `src/proxy.js` (modified) | `buildCsp` appends `NEXT_PUBLIC_MANAGER_ENDPOINT` to `connect-src` when set. Unset ⇒ byte-identical policy. | `buildCsp`, `proxy` |
-| `src/app/api/**/route.js` (17 files, 39 sites) | Each existing `console.error` / `console.warn` in an API error path is followed by `logServerError(...)` / `managerLog("warn", ...)` carrying the same message plus a `route` tag. Additive only. | — |
-| `scripts/check-manager-integration.mjs` | `npm run manager:check` — live check against a running Manager (key kinds, rejection paths, this app's own refresh error path) | — |
-| `scripts/measure-log-delivery.mjs` | `node scripts/measure-log-delivery.mjs [count]` — fires N entries at the facade and reports ingest requests, entries delivered, entries/request and SDK drops. Imports the facade directly, which is why the SDK specifier is an explicit `./logger.js`. | — |
-| `test/suites/manager-integration.suite.js` | 14 tests: disabled-when-unconfigured no-ops, enablement rules, blank values, server/client config split, tracker tag construction, batching + leading-edge flush, drop-count accessor, unknown-level fallback, shared `globalThis` instance, real SDK surface. Registered in `test/run-all.test.js`, the repo's single test entry point. | — |
+### Module layout and the browser boundary
+
+The integration is split by *where a module is allowed to run*. This is the single most
+important invariant: `next/server` and `node:async_hooks` must never be reachable from a
+client module, or the browser build breaks.
+
+| File | Runs in | Purpose | Exports |
+|---|---|---|---|
+| `src/lib/manager/config.js` | server **and** browser | Reads `MANAGER_*` / `NEXT_PUBLIC_MANAGER_*`. **Zero imports**, so nothing server-only can leak through it. Browser values are static `process.env.NEXT_PUBLIC_*` member expressions, because Next.js inlines only those. | `managerConfig`, `managerClientConfig`, `managerTrackerScript` |
+| `src/lib/manager/server-options.js` | server **and** browser | The shared `FLUSH_INTERVAL_MS` and `REDACT_KEYS` values, kept out of `server.js` so a plain-Node script can reproduce the server logger's configuration. | `FLUSH_INTERVAL_MS`, `REDACT_KEYS` |
+| `src/lib/manager/logger.js` | either | The vendored `@manager/logger` SDK. **GENERATED FILE — do not hand-edit.** Refreshed with `curl -H "x-manager-key: …" "…/api/sdk/logger?format=js"`. | `initLogger`, `shutdownLoggers`, `traceIdFromHeaders`, `fingerprint`, `LOG_SDK_VERSION`, `LOG_SDK_PATH`, `TRACE_HEADER` |
+| `src/lib/manager/server.js` | **server only** | Logger lifecycle, `withManagerLogs`, trace adoption, request context, flushing. | `getManagerLogger`, `startManagerLogger`, `withManagerLogs`, `traceIdForRequest`, `getRequestLogger`, `getRequestTraceId`, `reportRequestOutcome`, `managerLog`, `logServerEvent`, `logServerError`, `getManagerDroppedCount`, `flushManagerLogger` |
+| `src/lib/manager/index.js` | either | Facade re-exporting **`config.js` only**. It deliberately does *not* re-export `server.js`, so importing the facade can never pull `next/server` into a browser bundle or into a plain-Node script. | re-exports of `config.js` |
+| `src/lib/manager/ManagerProvider.jsx` | **browser only** | Starts the browser logger once per window and injects the analytics tracker once. Mounted in `src/app/layout.js`. | `ManagerProvider` (default) |
+| `src/app/api/**/route.js` (17 files, 30 verbs) | server | Every HTTP verb is exported as `withManagerLogs(handleVERB)`. Named helpers in the same module (e.g. `sanitizeCsvCell`) are left unwrapped. | — |
+| `src/proxy.js` | server | `buildCsp` adds `NEXT_PUBLIC_MANAGER_ENDPOINT` to `connect-src` **and** `script-src` when set. | `buildCsp`, `proxy` |
+| `src/app/error.js`, `src/app/(main)/error.js` | browser | Report a React boundary error explicitly — a boundary error never reaches `window.onerror`, so the SDK cannot see it on its own. | `RootError`, `MainError` |
+| `src/lib/api.js` | browser | Fetch wrapper. Tracks the "already retried" flag in a local instead of stamping `_authRetried` onto the caller's options object, which is also what the SDK's fetch wrapper receives. | default `api()` |
+| `scripts/check-manager-integration.mjs` | script | `npm run manager:check` — 21 live checks: key kinds, rejection counts, timestamps, SDK-download auth, this app's own routes, and an unreachable-Manager instance. | — |
+| `scripts/measure-log-delivery.mjs` | script | Fires N entries at the shared facade and reports ingest requests, entries delivered, entries/request and SDK drops. Imports the **facade** (config only) precisely because `server.js` cannot load in plain Node. | — |
+| `test/suites/manager-config.suite.js` | test | Config resolution, static-`NEXT_PUBLIC_` enforcement, single-instance browser logger, analytics-independence, and the module boundary (no client file may reach `manager/server`, no route may import the facade for server helpers). Also asserts the vendored SDK still carries the upstream fixes. | — |
+| `test/suites/manager-server.suite.js` | test | Root-logger caching, trace adoption, concurrent isolation, outcome classification, uncaught-error logging + re-throw, flush on every exit, ALS request context, and the real SDK options. | — |
+| `test/suites/manager-sdk.suite.js` | test | The SDK against a mock Manager: batching, 429/503 retries, outage tolerance, caps, timestamps, drop reporting, native + serialized error stacks, redaction, trace-aware grouping. | — |
+| `test/suites/manager-browser.suite.js` | test | The wrapped `fetch`: every request-header form (absent / object / tuple / `Headers` / `Request`), no caller mutation, no cross-origin header, console + uncaught + rejection + fetch-failure capture, capture while an upload is in flight. | — |
+| `test/suites/manager-contract.suite.js` | test | Payload conformance with Manager's documented strict schema: field whitelist, caps, batch limit, timestamp window, key-kind scoping, and generic `401` for unknown/revoked credentials. | — |
+
+### Request lifecycle
+
+`withManagerLogs(handler)` is the only thing a route needs:
+
+1. `rootLoggerOrNull()` returns the process-wide root logger, creating it on first use
+   and caching it on `globalThis.__managerServerLogger`. Lazy on purpose: Next compiles
+   route handlers and startup hooks into separate module graphs, so an instance created
+   at boot may not be the object a request sees. A request that logs *nothing* still
+   triggers creation, so its completion entry is delivered.
+2. `traceIdForRequest(request)` adopts `x-trace-id` via the SDK's `traceIdFromHeaders`,
+   or mints a UUID. Empty string when the integration is disabled.
+3. The child is `root.withTrace(traceId)` — a **child**. `setContext`/`newTrace` on the
+   shared root are never used, because those mutate the root and two concurrent requests
+   would overwrite each other's trace.
+4. The handler runs inside `requestStorage.run(store, …)`, a Node `AsyncLocalStorage`, so
+   `logServerError` / `managerLog` called anywhere below the route inherit the request's
+   logger and trace without threading a logger argument through every call.
+5. On return, one `request_completed` entry is written with the status the handler
+   actually produced, classified `response` / `redirect` / `export` / `threw`.
+6. On a throw, `unhandled_route_error` is recorded with the stack and then **rethrown**,
+   so the app's error-response policy is untouched.
+7. `finally` calls `scheduleFlush()` → `after(() => root.flush())`, on every exit.
+
+`reportRequestOutcome(kind, extra)` lets a handler describe an outcome the wrapper cannot
+infer — a thrown `redirect()`, which Next converts to a 3xx in a server component but not
+in a route handler.
 
 ### Delivery profile
 
-`managerLog` no longer flushes on every write. Flushing per entry turned the SDK's batch
-into one HTTP request per line: measured 96/200 delivered, 105 dropped, 20 requests,
-4.8 entries/request. The current shape measures 201/200 delivered, 0 dropped, 11 requests,
-18.3 entries/request (`scripts/measure-log-delivery.mjs 200`).
+Two independent mechanisms, because either alone loses entries:
 
-- `FLUSH_INTERVAL_MS = 250` is passed to the SDK as `flushIntervalMs`, so the SDK's own
-  timer does the batching. It is short on purpose — a serverless runtime can freeze timers
-  once the response is sent, so the SDK's 5s default could delay or strand entries.
-- `IMMEDIATE_LEVELS = {error, fatal}` skip the window via `scheduleUrgentFlush()`
-  (leading edge): flush now if `URGENT_FLUSH_MIN_GAP_MS` (100ms) has passed, otherwise
-  arm one trailing flush, so a burst of 50 errors costs ~2 requests, not 50.
-- `getManagerDroppedCount()` reads the SDK's `droppedCount()` for health checks. The
-  re-vendored SDK raises its own discards as a `warn` entry `manager_sdk_dropped_entries`
-  and raised `maxLogsPerSecond` from 50 to 500; a 50/s self-ceiling silently discarded most
-  of a busy server's output.
+- **Batching** — the SDK's `flushIntervalMs` is 250ms, so a burst of N lines becomes one
+  HTTP request. Measured: 200 entries → 10 requests, 20.0 entries/request, 0 dropped
+  (`scripts/measure-log-delivery.mjs 200`).
+- **Request-completion flushing** — `after(() => root.flush())`. Log methods only
+  enqueue; `await log.error(...)` does **not** flush, and a serverless runtime can freeze
+  timers once the response is sent, so a timer alone strands the tail of a burst.
 
-### Design notes
+For code outside a request (scripts, workers, cron jobs) there is no `after()`, so
+`flushManagerLogger()` must be awaited in the job's `finally`. The SDK also flushes on
+`SIGINT`/`SIGTERM`/`beforeExit` in Node and on `pagehide`/`visibilitychange` in the
+browser.
 
-- The server logger is created **on first use**, not in an `instrumentation` hook. This
-  app has no `instrumentation.js` and none was added: Next.js compiles startup hooks and
-  route handlers into separate module graphs, so a boot-created instance would not be
-  the object a request sees.
-- `captureProcessErrors` is intentionally **off** — Next.js owns process error handling
-  and extra process listeners stop delivery.
-- The SDK import is an explicit `./logger.js` so the facade also loads in plain Node
-  (`scripts/measure-log-delivery.mjs`), not only under the bundler.
-- Coverage is the server API error paths. Client-side `console.error` in components and
-  pages is not fanned out server-side — the browser SDK captures it instead via
-  `captureConsole`.
+`getManagerDroppedCount()` reports entries this process discarded (SDK self-rate-limit or
+queue overflow). The SDK raises the same condition as a `warn` entry named
+`manager_sdk_dropped_entries`, so client-side loss shows up in the viewer instead of
+vanishing.
+
+### Security posture
+
+- `captureProcessErrors` is deliberately **off** — Next.js owns process error handling and
+  extra process listeners stop delivery.
+- `captureConsole: null` on the server, so the app's existing `console.*` output is
+  unchanged and nothing is double-logged.
+- `REDACT_KEYS` extends the SDK defaults with `cvv`, `cardnumber`, `card_number`,
+  `accountnumber`, `account_number`, `iban` and `ssn`, so a stray financial identifier in
+  a payload cannot ride along.
+- The `mlk_` server key never appears in a `NEXT_PUBLIC_` variable. Verified by building
+  with a real key and grepping the entire `.next` output: zero occurrences.
+- The tracker key travels in a `data-key` attribute, never in a URL.
+- Error responses are unchanged: the wrapper re-throws, and `logServerError` never puts
+  internals into a response body.
+
+### Design notes and known deviations
+
 - **Deviation from the ResumeBuilder reference:** the reference reads `MANAGER_ENDPOINT` /
-  `MANAGER_APP_ID` / `MANAGER_LOG_KEY` from inside a `"use client"` module. Next.js
-  replaces `process.env` in browser code with an empty object, so all three resolve to
-  `undefined`, `managerConfig.enabled` is `false`, and `ManagerProvider` returns before
-  doing anything — the browser logger and analytics are dead code. Worse, adding a
-  `NEXT_PUBLIC_` block is not sufficient on its own: Next.js inlines only *statically
-  written* `process.env.NEXT_PUBLIC_FOO` member expressions, so the reference's dynamic
-  `env(name)` helper compiles to a runtime index into that same empty object and is
-  equally dead. This repo therefore splits the config (`managerConfig` for the server,
-  `managerClientConfig` for the browser) and reads every client value with a static
-  member expression.
-- **Deviation:** `src/proxy.js` `connect-src` gains the Manager origin. This app emits
-  a strict nonce + `strict-dynamic` CSP where `connect-src` is `'self'`, so the browser
-  logger and the tracker would be silently blocked. `script-src` needs no change —
-  `strict-dynamic` already trusts a `<script>` inserted by a nonce'd script.
+  `MANAGER_APP_ID` / `MANAGER_LOG_KEY` inside a `"use client"` module. Next.js replaces
+  `process.env` in browser code with an empty object, so all three resolve to `undefined`
+  and the browser logger never starts. Adding a `NEXT_PUBLIC_` block is not sufficient on
+  its own either: a *dynamic* `env(name)` helper compiles to a runtime index into that
+  same empty object. Hence the `config.js` / `server.js` split and static member reads.
+- **Deviation:** `src/proxy.js` adds the Manager origin to `script-src` as well as
+  `connect-src`. CSP3 browsers honour `strict-dynamic` and ignore host sources, so the
+  tracker is trusted transitively either way; browsers without `strict-dynamic` fall back
+  to host allowlists and would block it without the explicit origin.
+- **Known SDK wart:** on a `withTrace()` child, `child.traceId()` returns the *root's*
+  trace even though the child's entries are emitted under its own. `getRequestTraceId()`
+  exposes the id this app created instead. The SDK belongs to Manager, so the wart is
+  reported rather than patched (see `docs/suggestions.md`).
+- `MANAGER_LOG_SOURCE` was removed: Manager derives each entry's `source` from the key
+  kind, and a `mak_` key can never write logs, so the setting could only ever be wrong.
+- Coverage is the server API surface (all 30 verbs) plus the browser SDK. Client-side
+  `console.error` in components and pages is captured by the SDK's console interception
+  rather than fanned out server-side.
+- No background worker or cron exists in this app today: the recurring engine runs inside
+  the OTP-verification request (`lib/recurring.js` → `materializeDueRules`), so it is
+  already covered by `after()`. A future worker must call `flushManagerLogger()` before
+  exit.
+
+---
+
+## Verification record
+
+`docs/verification/manager-integration-2026-09-29.md` holds the full verification report
+for the 2026-09-29 integration rebuild: commands and results, application flows
+exercised, synthetic error/redaction evidence, trace-correlation and analytics evidence,
+what was real versus mocked, and the cleanup performed.

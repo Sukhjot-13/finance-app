@@ -66,14 +66,23 @@ const TransactionSchema = new mongoose.Schema(
     // Which recurring rule materialized this row, and the occurrence it
     // represents. Together they form the uniqueness key that makes
     // materializeDueRules idempotent under concurrent calls (Task 1).
+    //
+    // DELIBERATELY NO `default: null`. A MongoDB `sparse` index only skips
+    // documents where the indexed field is ABSENT — an explicit `null` is
+    // still a value, and still gets indexed. With `default: null`, every
+    // hand-created transaction stored (null, null) and the second one in the
+    // whole collection failed with
+    //   E11000 duplicate key … recurringRuleId_1_scheduledFor_1
+    // i.e. only the first manual transaction ever succeeded. Leaving the
+    // fields undefined on ordinary rows is what actually makes the sparse
+    // index skip them, and it works on already-provisioned databases because
+    // it changes only the documents written from now on.
     recurringRuleId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Recurring",
-      default: null,
     },
     scheduledFor: {
       type: Date,
-      default: null,
     },
     // One-time/sudden expenses that should not count toward monthly budget
     // progress. Consumers read it with truthy checks so pre-existing documents
@@ -94,10 +103,10 @@ const TransactionSchema = new mongoose.Schema(
 TransactionSchema.index({ userId: 1, date: -1 });
 TransactionSchema.index({ userId: 1, type: 1, date: -1 });
 
-// Second line of defence for recurring materialization. `sparse` so
-// hand-created transactions (both fields null) are exempt — a sparse
-// compound index only indexes documents that actually carry the key, so
-// many ordinary rows can all share the same (null, null) pair.
+// Second line of defence for recurring materialization. `sparse` exempts
+// hand-created transactions — but ONLY because those documents omit the two
+// fields entirely (see the schema comment above). This index is the reason
+// those fields must never be given a `default: null`.
 TransactionSchema.index(
   { recurringRuleId: 1, scheduledFor: 1 },
   { unique: true, sparse: true }

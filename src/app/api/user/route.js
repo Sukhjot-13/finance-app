@@ -3,10 +3,10 @@ import dbConnect from "@/lib/mongodb";
 import User from "@/models/user.model";
 import { verifySession } from "@/lib/auth"; // Import the new function
 import { NextResponse } from "next/server";
-import { logServerError } from "@/lib/manager";
+import { logServerError, withManagerLogs } from "@/lib/manager/server";
 
 // GET user details
-export async function GET(req) {
+async function handleGET(req) {
   // Full session check (access token + refresh token in DB)
   const { user, status } = await verifySession();
   if (!user) {
@@ -28,7 +28,7 @@ export async function GET(req) {
 }
 
 // UPDATE user details
-export async function PUT(req) {
+async function handlePUT(req) {
     const { user, status } = await verifySession();
     if (!user) {
         return NextResponse.json({ message: "Unauthorized" }, { status: status || 401 });
@@ -101,3 +101,9 @@ export async function PUT(req) {
         return NextResponse.json({ message: "Server error" }, { status: 500 });
     }
 }
+
+// Every verb below is wrapped so the request gets a trace-scoped child
+// logger, a completion entry with the status it actually produced, and a
+// flush scheduled with `after()` once the response completes.
+export const GET = withManagerLogs(handleGET);
+export const PUT = withManagerLogs(handlePUT);

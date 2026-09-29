@@ -5,14 +5,14 @@ import Recurring from "@/models/recurring.model";
 import { verifySession } from "@/lib/auth";
 import { sendError, sendSuccess } from "@/lib/server-utils";
 import { coerceAmount, toMinorUnits } from "@/lib/money";
-import { logServerError } from "@/lib/manager";
+import { logServerError, withManagerLogs } from "@/lib/manager/server";
 
 async function findOwnedRule(id, userId) {
   if (!mongoose.Types.ObjectId.isValid(id)) return null;
   return Recurring.findOne({ _id: id, userId });
 }
 
-export async function PATCH(req, { params }) {
+async function handlePATCH(req, { params }) {
   const { user, status } = await verifySession();
   if (!user) {
     return sendError("Unauthorized", status || 401);
@@ -68,7 +68,7 @@ export async function PATCH(req, { params }) {
   }
 }
 
-export async function DELETE(_req, { params }) {
+async function handleDELETE(_req, { params }) {
   const { user, status } = await verifySession();
   if (!user) {
     return sendError("Unauthorized", status || 401);
@@ -89,3 +89,9 @@ export async function DELETE(_req, { params }) {
     return sendError("Failed to delete recurring rule.", 500);
   }
 }
+
+// Every verb below is wrapped so the request gets a trace-scoped child
+// logger, a completion entry with the status it actually produced, and a
+// flush scheduled with `after()` once the response completes.
+export const PATCH = withManagerLogs(handlePATCH);
+export const DELETE = withManagerLogs(handleDELETE);

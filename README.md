@@ -101,81 +101,185 @@ integration is a set of no-ops, so local development, CI and previews are unaffe
 |---|---|---|
 | `MANAGER_ENDPOINT` | logs + analytics | base URL of the **Manager** deployment — not this app's own port |
 | `MANAGER_APP_ID` | logs + analytics | project slug in Manager |
-| `MANAGER_LOG_KEY` | server logs | `mlk_…` server key |
-| `MANAGER_ANALYTICS_KEY` | analytics | `mak_…` |
-| `MANAGER_LOG_SOURCE` | optional | `server` (default) or `client` |
+| `MANAGER_LOG_KEY` | server logs | `mlk_…` **server** key — server-only, never a `NEXT_PUBLIC_` value |
 | `NEXT_PUBLIC_MANAGER_ENDPOINT` | browser logs + analytics | same value as `MANAGER_ENDPOINT` |
 | `NEXT_PUBLIC_MANAGER_APP_ID` | browser logs + analytics | same value as `MANAGER_APP_ID` |
-| `NEXT_PUBLIC_MANAGER_CLIENT_KEY` | browser logs | `mck_…` client key |
-| `NEXT_PUBLIC_MANAGER_ANALYTICS_KEY` | analytics | `mak_…` |
+| `NEXT_PUBLIC_MANAGER_CLIENT_KEY` | browser logs | `mck_…` **client** key |
+| `NEXT_PUBLIC_MANAGER_ANALYTICS_KEY` | analytics | `mak_…` analytics key |
+
+There is no `MANAGER_LOG_SOURCE`: Manager derives each entry's `source` from the key
+kind, so the key you use already decides whether a row is a `server` or `client` row.
+(`mak_…` keys write analytics events only and can never write logs.)
+
+**`NEXT_PUBLIC_*` values are inlined at BUILD time.** Changing one requires a rebuild, not
+just a restart — a restart alone leaves the old value compiled into the bundle.
 
 **The `NEXT_PUBLIC_` block is required for the browser half, not optional.** Next.js
-only inlines `NEXT_PUBLIC_*` into the client bundle — `process.env` in browser code is
-an empty object, so reading the `MANAGER_*` values from a `"use client"` module always
-yields nothing and the browser logger never starts. Use the project's **client** key
-(`mck_…`) there: Manager derives each entry's `source` from the key kind.
+only inlines *statically written* `process.env.NEXT_PUBLIC_FOO` member expressions into
+the client bundle. Two traps, both verified against a production build of this repo:
+`process.env` in browser code is an empty object, and a *dynamic* lookup
+(`process.env[name]`, i.e. any `env(name)` helper) compiles to a runtime index into that
+same empty object — equally dead. So every browser value in `src/lib/manager/config.js` is
+written out statically.
+
+Use the project's **client** key (`mck_…`) there. Reusing `mlk_…` would leak the server
+key to every visitor; Manager derives an entry's `source` from the key kind, so browser
+entries must carry the client key.
 
 `MANAGER_ENDPOINT` is Manager's own base URL (`http://127.0.0.1:3300` for a local Manager).
 It is easy to get backwards and point it at this app's dev port, which makes every log
 POST fail silently.
 
-What gets wired up:
+### Module layout
 
-- **Every server error path** in `src/app/api/**/route.js` already called
-  `console.error` (and the two refresh-token-reuse `console.warn`s); each now also
-  calls `logServerError` / `managerLog` from `src/lib/manager/index.js`, so the same
-  failures land in Manager. The `console.*` output is unchanged. This app has no
-  logger of its own, so `src/lib/manager/index.js` is the single entry point — no
-  app-wide logging layer was introduced.
-- **Unhandled crashes and rejections in the browser**, plus browser `console.warn` /
-  `console.error`, are captured by the SDK.
-- **Analytics**: one script tag is injected client-side, tracking pageviews (SPA routes
-  included), click targets, referrers and UTM params. `src/proxy.js` adds the Manager
-  origin to the CSP `connect-src` when `NEXT_PUBLIC_MANAGER_ENDPOINT` is set, otherwise
-  the strict policy would silently block the tracker and the browser logger.
+| Module | Safe in | Responsibility |
+|---|---|---|
+| `src/lib/manager/config.js` | server **and** browser | Reads `MANAGER_*` / `NEXT_PUBLIC_MANAGER_*`. Zero imports, so nothing server-only can leak into the client bundle. |
+| `src/lib/manager/server.js` | **server only** | Logger lifecycle, `withManagerLogs`, trace adoption, request context, flushing. Imports `next/server` and `node:async_hooks`. |
+| `src/lib/manager/server-options.js` | server **and** browser | The shared `flushIntervalMs` / `redactKeys` values, so a plain-Node script can reproduce the server logger's configuration. |
+| `src/lib/manager/index.js` | either | Facade re-exporting `config.js` only. Server helpers are **not** re-exported here — import them from `@/lib/manager/server` so the browser half can never pull in `next/server`. |
+| `src/lib/manager/ManagerProvider.jsx` | **browser only** | Starts the browser logger once per window and injects the analytics tracker. Mounted in `src/app/layout.js`. |
+| `src/lib/manager/logger.js` | either | The vendored SDK. **Generated — never hand-edit.** |
 
-Refresh the vendored SDK (one file, zero dependencies):
+### What gets wired up
+
+**Server.** Every route handler export is wrapped with `withManagerLogs(...)` in
+`src/app/api/**/route.js` (17 files, 30 verbs). The wrapper:
+
+- gives the request a **child** logger carrying the trace adopted from the incoming
+  `x-trace-id` (or a fresh one). It never calls `setContext`/`newTrace` on the shared
+  root, so two concurrent requests cannot overwrite each other's trace;
+- records one `request_completed` entry with the status the handler actually produced,
+  classified as `response` / `redirect` / `export` / `threw` — so successful responses,
+  early returns, redirects and CSV exports are all visible, not just failures;
+- records an uncaught exception as `unhandled_route_error` **with its stack**, then
+  re-throws it, so the app's own error-response policy is unchanged;
+- schedules `after(() => root.flush())` so delivery completes after the response on
+  every exit path.
+
+Handled failures stay where they already were: the route's own `catch` calls
+`logServerError(...)` / `managerLog("warn", ...)`, which now ride the request's logger
+and therefore inherit its trace. `console.*` output is unchanged — no app-wide logging
+layer was introduced, and there is still no logger of the app's own.
+
+**Browser.** The SDK captures explicit logs, `console.warn` / `console.error`, uncaught
+errors, unhandled rejections and same-origin `fetch` outcomes. The instance is cached on
+`window.__managerClientLogger`, so Strict Mode, Fast Refresh and repeated provider mounts
+cannot install duplicate listeners or duplicate uploads. React error boundaries report
+explicitly (`src/app/error.js`, `src/app/(main)/error.js`) because a boundary error never
+reaches `window.onerror`.
+
+**Analytics.** One `<script>` tag with `id="manager-tracker"`, injected into `<head>` at
+most once. It is gated on its own `mak_` key, so **analytics works with no client log
+key**, and browser logging works with no analytics key. `src/proxy.js` adds the Manager
+origin to the CSP `connect-src` (log/event uploads) and to `script-src` (the tracker),
+so the strict per-request-nonce policy does not silently block either.
+
+### Trace correlation
+
+The browser SDK stamps `x-trace-id` on **same-origin** fetches only — adding it to a
+third-party call would force a CORS preflight. The server adopts that header through
+`traceIdForHeaders` and scopes it to a request-local child logger, which is also stored in
+a Node `AsyncLocalStorage` so deeper code (`lib/recurring.js`, helpers) logs under the
+same trace without threading a logger through every call. A client error and the server
+line that answered it therefore appear together in Manager under one trace.
+
+`getRequestTraceId()` returns the id this app created. Do **not** use
+`childLogger.traceId()` for that: in the vendored SDK a `withTrace()` child *emits* under
+its own trace but its `traceId()` accessor reads the shared root's.
+
+### Refreshing the vendored SDK
+
+The SDK is generated by Manager and does **not** update itself. Re-download it whenever
+Manager is upgraded; never patch the file by hand (a hand-patched copy silently loses
+upstream fixes — see `docs/suggestions.md`).
 
 ```bash
+# The key travels in a HEADER, never in a URL (a URL leaks via history/referrers/logs).
 curl -fsSL -H "x-manager-key: $MANAGER_LOG_KEY" \
-  "http://127.0.0.1:3300/api/sdk/logger?format=js" -o src/lib/manager/logger.js
+  "$MANAGER_ENDPOINT/api/sdk/logger?format=js" -o src/lib/manager/logger.js
+npm test && npm run build
 ```
 
-Verify the wiring against a running Manager:
+`test/suites/manager-config.suite.js` fails if the vendored file stops matching what
+Manager serves, so a stale SDK is caught in CI rather than in production.
+
+### Verifying the wiring
 
 ```bash
-npm run manager:check   # needs MANAGER_ENDPOINT, MANAGER_LOG_KEY, MANAGER_ANALYTICS_KEY
+npm run manager:check
 ```
 
-It posts one log and one event through the real endpoints, asserts the right key kinds
-are accepted and the wrong ones are refused, then hits this app's own
-`POST /api/auth/refresh` error path.
+`scripts/check-manager-integration.mjs` runs 21 checks against a live Manager and (if
+`APP_ORIGIN` is set) a running FinTrack:
 
-### Delivery tuning
+| Group | What it proves |
+|---|---|
+| 1 | the right key kind works at the intended endpoint — and only there |
+| 2 | analytics cannot write logs; server and client keys cannot write events; unknown keys get a generic `401` |
+| 3 | rejection is **counted** (`accepted`/`rejected`), and stale/future timestamps, bad levels and client-sent Manager-owned fields are all refused |
+| 4 | the SDK download is authenticated by header only, and an analytics key cannot fetch it |
+| 5 | this app's own routes really deliver logs, and a protected route still rejects an anonymous caller |
+| 6 | with `APP_ORIGIN_DEGRADED` pointing at an instance whose `MANAGER_ENDPOINT` is unreachable, the app still serves and does not block |
 
-Server logs do **not** flush on every write. `src/lib/manager/index.js` sets the SDK's
-`flushIntervalMs` to 250ms, so a burst of N log lines becomes one HTTP request instead of
-N. The window is deliberately short: serverless runtimes can freeze timers after a
-response is sent, which would strand anything still sitting in the batch.
+```bash
+APP_ORIGIN=http://127.0.0.1:3000 APP_COOKIE="accessToken=…; refreshToken=…" npm run manager:check
+```
 
-`error` and `fatal` skip the window with a leading-edge flush — sent immediately, but no
-more than once per 100ms, with a trailing flush so a burst of 50 errors costs ~2 requests
-rather than 50.
+Without `APP_COOKIE` the authenticated probes are reported as **skipped**, not passed.
+
+### Delivery behaviour
+
+Log methods **enqueue**; `await log.error(...)` does not flush. Delivery therefore has two
+independent parts:
+
+- **Batching.** The SDK's `flushIntervalMs` is 250ms, so a burst of N lines becomes one
+  HTTP request instead of N. The window is short on purpose: a serverless runtime can
+  freeze timers once the response is sent.
+- **Request-completion flushing.** `withManagerLogs` schedules `after(() => root.flush())`,
+  which is what actually guarantees delivery. A timer alone is not enough.
+
+For code **outside** a request (scripts, workers, cron jobs) there is no `after()`, so
+flush explicitly before exit:
+
+```js
+import { getManagerLogger } from "@/lib/manager/server";
+const log = getManagerLogger();
+try {
+  await runJob();
+} finally {
+  await log.flush();
+}
+```
 
 Measured with `node scripts/measure-log-delivery.mjs 200` (200 entries, one in ten at
 `error`):
 
 ```
-ingest requests    : 11
-entries delivered  : 201      (200 + manager_logger_started)
-entries/request    : 18.3
-sdk dropped       : 0
+ingest requests    : 10
+entries delivered  : 200
+entries/request    : 20.0
+sdk dropped        : 0
 ```
 
 `getManagerDroppedCount()` reports entries this client discarded (its own rate limit or
 queue overflow). The SDK raises the same condition as a `warn` entry named
 `manager_sdk_dropped_entries`, so client-side loss shows up in the log viewer instead of
 vanishing.
+
+### Troubleshooting
+
+| Symptom | Check |
+|---|---|
+| Nothing arrives from the browser | `NEXT_PUBLIC_*` is inlined at **build** time — rebuild after changing it. Then: the `mck_` key, the `#manager-tracker`/logger actually initialising, and the CSP `connect-src` containing the Manager origin. |
+| Server logs missing after a successful response | the route is wrapped in `withManagerLogs` (so `after()` runs on every exit), and `MANAGER_LOG_KEY` is the `mlk_` server key. |
+| Analytics missing while logs work | the `mak_` key alone is enough; confirm `#manager-tracker` exists, `/t.js` returns 200, and no blocker/CSP error is in the console. |
+| HTTP 200 but no rows | read `accepted` / `rejected`, check the timestamps are current, the key's project, and the viewer's source/level/trace filters. |
+| HTTP 401 | the endpoint is Manager's **origin** (not `/api/ingest/logs`), and the key kind matches. |
+| HTTP 429 | honour `Retry-After`; the SDK already retries with bounded exponential backoff. |
+| Duplicate browser messages | more than one SDK instance — check there is exactly one `ManagerProvider` and one `window.__managerClientLogger`. |
+| Traces do not join up | the request must be **same-origin**; the server adopts `x-trace-id` only from that header. |
+| Old behaviour after an SDK fix | re-download `src/lib/manager/logger.js` from the updated Manager and rebuild. |
 
 Notes:
 

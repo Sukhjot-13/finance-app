@@ -10,24 +10,31 @@ import { jwtVerify } from "jose";
  * - style-src keeps 'unsafe-inline' because Framer Motion/Chart.js tuning
  *   relies on inline styling.
  * - Dev additionally allows 'unsafe-eval' for HMR/Turbopack.
- * - connect-src gains the Manager origin when it is configured: the browser
- *   logger and the analytics tracker both POST there, and 'self' alone would
- *   silently block them. Unset => unchanged policy, so the integration stays a
- *   no-op when it is not configured. The tracker <script> itself needs no
- *   script-src change: 'strict-dynamic' already trusts a script inserted by a
- *   nonce'd script.
+ * - connect-src AND script-src gain the Manager origin when it is configured:
+ *   the browser logger and the analytics tracker both POST there, and 'self'
+ *   alone would silently block them. Unset => unchanged policy, so the
+ *   integration stays a no-op when it is not configured.
+ *
+ *   script-src: CSP3 browsers honour 'strict-dynamic' and IGNORE host sources,
+ *   and the tracker tag is inserted by a nonce'd script, so it is trusted
+ *   transitively. Browsers that do not implement 'strict-dynamic' (and therefore
+ *   fall back to host allowlists) would block the tracker without the explicit
+ *   origin, so it is listed for them.
  */
 function buildCsp(nonce) {
   const isDev = process.env.NODE_ENV === "development";
+  const managerOrigin = process.env.NEXT_PUBLIC_MANAGER_ENDPOINT
+    ? ` ${process.env.NEXT_PUBLIC_MANAGER_ENDPOINT}`
+    : "";
   return [
     "default-src 'self'",
-    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${
+    `script-src 'self'${managerOrigin} 'nonce-${nonce}' 'strict-dynamic'${
       isDev ? " 'unsafe-eval'" : ""
     }`,
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob:",
     "font-src 'self' data:",
-    `connect-src 'self'${process.env.NEXT_PUBLIC_MANAGER_ENDPOINT ? ` ${process.env.NEXT_PUBLIC_MANAGER_ENDPOINT}` : ""}`,
+    `connect-src 'self'${managerOrigin}`,
     "object-src 'none'",
     "base-uri 'self'",
     "form-action 'self'",

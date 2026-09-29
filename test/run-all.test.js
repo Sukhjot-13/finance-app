@@ -29,6 +29,19 @@ vi.mock("next/headers", () => ({
   cookies: (...args) => globalThis.__cookiesStore(...args),
 }));
 
+// ---- next/server: only `after` is delegated ----
+// `after()` only exists inside a Next request scope, so the manager suite
+// captures the scheduled callbacks instead of running them, and asserts both
+// that they were registered and what they do when they run. NextResponse and
+// friends come from the real module so route suites are unaffected.
+vi.mock("next/server", async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    after: (callback) => globalThis.__afterCallbacks.push(callback),
+  };
+});
+
 // ---- lib/auth: keep every REAL export; only verifySession delegates ----
 vi.mock("@/lib/auth", async (importOriginal) => {
   const actual = await importOriginal();
@@ -113,7 +126,11 @@ await Promise.all([
   import("./suites/api-client.suite.js"),
   import("./suites/server-utils.suite.js"),
   import("./suites/rate-limit.suite.js"),
-  import("./suites/manager-integration.suite.js"),
+  import("./suites/manager-config.suite.js"),
+  import("./suites/manager-server.suite.js"),
+  import("./suites/manager-sdk.suite.js"),
+  import("./suites/manager-browser.suite.js"),
+  import("./suites/manager-contract.suite.js"),
   import("./suites/dialog-a11y.suite.jsx"),
   import("./suites/proxy.suite.js"),
   import("./suites/models.suite.js"),

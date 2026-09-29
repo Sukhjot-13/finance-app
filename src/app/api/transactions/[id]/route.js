@@ -5,12 +5,12 @@ import { verifySession } from "@/lib/auth"; // Using the secure session verifier
 import { sendError, sendSuccess } from "@/lib/server-utils";
 import mongoose from "mongoose";
 import { coerceAmount, toMinorUnits } from "@/lib/money";
-import { logServerError } from "@/lib/manager";
+import { logServerError, withManagerLogs } from "@/lib/manager/server";
 
 /**
  * GET a single transaction by its ID.
  */
-export async function GET(request, { params }) {
+async function handleGET(request, { params }) {
   const { user, error, status: sessionStatus } = await verifySession();
   if (error || !user) return sendError(error || "Unauthorized", sessionStatus || 401);
 
@@ -42,7 +42,7 @@ export async function GET(request, { params }) {
 /**
  * PUT (update) a transaction by its ID.
  */
-export async function PUT(request, { params }) {
+async function handlePUT(request, { params }) {
   const { user, error, status: sessionStatus } = await verifySession();
   if (error || !user) return sendError(error || "Unauthorized", sessionStatus || 401);
 
@@ -154,7 +154,7 @@ export async function PUT(request, { params }) {
 /**
  * DELETE a transaction by its ID.
  */
-export async function DELETE(request, { params }) {
+async function handleDELETE(request, { params }) {
   const { user, error, status: sessionStatus } = await verifySession();
   if (error || !user) return sendError(error || "Unauthorized", sessionStatus || 401);
 
@@ -183,3 +183,10 @@ export async function DELETE(request, { params }) {
     return sendError("Server error", 500);
   }
 }
+
+// Every verb below is wrapped so the request gets a trace-scoped child
+// logger, a completion entry with the status it actually produced, and a
+// flush scheduled with `after()` once the response completes.
+export const GET = withManagerLogs(handleGET);
+export const PUT = withManagerLogs(handlePUT);
+export const DELETE = withManagerLogs(handleDELETE);

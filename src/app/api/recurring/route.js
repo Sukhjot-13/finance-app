@@ -5,7 +5,7 @@ import { verifySession } from "@/lib/auth";
 import { firstRunDate } from "@/lib/recurring";
 import { sendError, sendSuccess } from "@/lib/server-utils";
 import { coerceAmount, toMinorUnits } from "@/lib/money";
-import { logServerError } from "@/lib/manager";
+import { logServerError, withManagerLogs } from "@/lib/manager/server";
 
 function validateRuleBody(body) {
   const { type, amount, category, frequency, dayOfMonth, dayOfWeek } = body || {};
@@ -42,7 +42,7 @@ function validateRuleBody(body) {
   return null;
 }
 
-export async function GET() {
+async function handleGET() {
   const { user, status } = await verifySession();
   if (!user) {
     return sendError("Unauthorized", status || 401);
@@ -58,7 +58,7 @@ export async function GET() {
   }
 }
 
-export async function POST(req) {
+async function handlePOST(req) {
   const { user, status } = await verifySession();
   if (!user) {
     return sendError("Unauthorized", status || 401);
@@ -104,3 +104,9 @@ export async function POST(req) {
     return sendError("Failed to create recurring rule.", 500);
   }
 }
+
+// Every verb below is wrapped so the request gets a trace-scoped child
+// logger, a completion entry with the status it actually produced, and a
+// flush scheduled with `after()` once the response completes.
+export const GET = withManagerLogs(handleGET);
+export const POST = withManagerLogs(handlePOST);

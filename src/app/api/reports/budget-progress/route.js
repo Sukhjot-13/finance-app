@@ -6,11 +6,11 @@ import mongoose from "mongoose";
 import { NextResponse } from "next/server";
 import { isValidMonthKey, utcMonthKey } from "@/lib/utils";
 import { AMOUNT_MINOR_EXPR, fromMinorUnits, toMinorUnits } from "@/lib/money";
-import { logServerError } from "@/lib/manager";
+import { logServerError, withManagerLogs } from "@/lib/manager/server";
 
 const OVERALL_CATEGORY = "__total__";
 
-export async function GET(req) {
+async function handleGET(req) {
   const { user, status } = await verifySession();
   if (!user) {
     return NextResponse.json({ message: "Unauthorized" }, { status: status || 401 });
@@ -175,3 +175,8 @@ export async function GET(req) {
     return NextResponse.json({ message: "Server error" }, { status: 500 });
   }
 }
+
+// Every verb below is wrapped so the request gets a trace-scoped child
+// logger, a completion entry with the status it actually produced, and a
+// flush scheduled with `after()` once the response completes.
+export const GET = withManagerLogs(handleGET);

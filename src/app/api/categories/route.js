@@ -5,10 +5,10 @@ import Category from "@/models/category.model";
 import { verifySession } from "@/lib/auth";
 import { defaultExpenseCategories, defaultIncomeCategories } from "@/lib/constants";
 import { isReservedCategoryName, RESERVED_CATEGORY_NAMES } from "@/lib/money";
-import { logServerError } from "@/lib/manager";
+import { logServerError, withManagerLogs } from "@/lib/manager/server";
 
 // GET all categories for the user (defaults + custom)
-export async function GET(request) {
+async function handleGET(request) {
   const { user, status } = await verifySession();
   if (!user)
     return NextResponse.json({ message: "Not authenticated" }, { status: status || 401 });
@@ -42,7 +42,7 @@ export async function GET(request) {
 }
 
 // POST a new custom category
-export async function POST(request) {
+async function handlePOST(request) {
   const { user, status } = await verifySession();
   if (!user)
     return NextResponse.json({ message: "Not authenticated" }, { status: status || 401 });
@@ -115,3 +115,9 @@ export async function POST(request) {
     );
   }
 }
+
+// Every verb below is wrapped so the request gets a trace-scoped child
+// logger, a completion entry with the status it actually produced, and a
+// flush scheduled with `after()` once the response completes.
+export const GET = withManagerLogs(handleGET);
+export const POST = withManagerLogs(handlePOST);

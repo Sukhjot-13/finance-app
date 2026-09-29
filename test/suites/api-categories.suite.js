@@ -1,5 +1,6 @@
 // test/suites/api-categories.suite.js — src/app/api/categories/*
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { afterAll, afterEach, describe, it, expect, beforeEach, vi } from "vitest";
+import mongoose from "mongoose";
 
 const loadRoute = () => import("@/app/api/categories/route");
 const loadIdRoute = () => import("@/app/api/categories/[id]/route");
@@ -16,10 +17,38 @@ const req = (url, method = "GET", body) =>
     headers: { "Content-Type": "application/json" },
   });
 
+// The rename cascade opens a real Mongo session. With no live connection that
+// call buffers for mongoose's full 10s bufferTimeoutMS before failing over to
+// the standalone fallback — three tests, 30 seconds of pure waiting. Stubbing
+// `startSession` to reject reproduces the standalone deployment exactly (Atlas
+// is a replica set; a single-node mongod is not) and makes the suite both fast
+// and deterministic. Tests that need a working session override the stub.
+const realStartSession = mongoose.startSession.bind(mongoose);
+let startSessionImpl = null;
+
 beforeEach(() => {
   vi.clearAllMocks();
   globalThis.__verifySessionImpl = vi.fn(async () => ({ user: { _id: "64b64b64b64b64b64b64b64b" } }));
+  startSessionImpl = null;
+  vi.spyOn(mongoose, "startSession").mockImplementation(() =>
+    startSessionImpl
+      ? startSessionImpl()
+      : Promise.reject(new Error("Transaction numbers are only allowed on a replica set member"))
+  );
 });
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
+afterAll(() => {
+  mongoose.startSession = realStartSession;
+});
+
+/** Installs a session stub for one test: pass a fake session, or null for none. */
+const withSession = (session) => {
+  startSessionImpl = session ? () => Promise.resolve(session) : () => Promise.resolve(null);
+};
 
 describe("GET /api/categories", () => {
   it("merges defaults with custom names, deduped per type", async () => {
@@ -165,6 +194,90 @@ describe("PUT /api/categories/[id] — rename cascade (M3)", () => {
     expect(res.status).toBe(200);
     expect(T().updateMany).not.toHaveBeenCalled();
     expect(B().updateMany).not.toHaveBeenCalled();
+  });
+
+  it("uses a real transaction when the deployment supports one", async () => {
+    // The transactional path (Atlas / replica set) was previously only
+    // reachable by accident: with no live connection the route always fell
+    // through to the standalone fallback.
+    const cat = makeCategory("OldName");
+    C().findOne.mockResolvedValueOnce(cat);
+    const calls = [];
+    const session = {
+      withTransaction: vi.fn(async (fn) => {
+        calls.push("withTransaction");
+        await fn();
+      }),
+      endSession: vi.fn(() => calls.push("endSession")),
+    };
+    withSession(session);
+    C().findById.mockResolvedValueOnce({ ...cat, name: "NewName" });
+    const { PUT } = await loadIdRoute();
+
+    const res = await PUT(
+      req(`http://localhost/api/categories/${VALID_ID}`, "PUT", { name: "NewName" }),
+      { params: Promise.resolve({ id: VALID_ID }) }
+    );
+
+    expect(res.status).toBe(200);
+    expect(calls).toEqual(["withTransaction", "endSession"]);
+    // Every write is scoped to the session, so a mid-cascade failure rolls back.
+    expect(T().updateMany).toHaveBeenCalledWith(
+      { userId: "64b64b64b64b64b64b64b64b", category: "OldName" },
+      { $set: { category: "NewName" } },
+      { session }
+    );
+    expect(B().updateMany).toHaveBeenCalledWith(
+      { userId: "64b64b64b64b64b64b64b64b", category: "OldName" },
+      { $set: { category: "NewName" } },
+      { session }
+    );
+    expect(await res.json()).toMatchObject({ name: "NewName" });
+  });
+
+  it("maps a duplicate-key failure INSIDE the transaction to 409", async () => {
+    const cat = makeCategory("OldName");
+    C().findOne.mockResolvedValueOnce(cat);
+    const session = {
+      withTransaction: vi.fn(async () => {
+        throw Object.assign(new Error("E11000 duplicate key"), { code: 11000 });
+      }),
+      endSession: vi.fn(),
+    };
+    withSession(session);
+    const { PUT } = await loadIdRoute();
+
+    const res = await PUT(
+      req(`http://localhost/api/categories/${VALID_ID}`, "PUT", { name: "Taken" }),
+      { params: Promise.resolve({ id: VALID_ID }) }
+    );
+
+    expect(res.status).toBe(409);
+    expect(session.endSession).toHaveBeenCalled();
+  });
+
+  it("falls back to sequential writes when the transaction is unsupported", async () => {
+    const cat = makeCategory("OldName");
+    C().findOne.mockResolvedValueOnce(cat);
+    withSession({
+      withTransaction: vi.fn(async () => {
+        throw new Error("Transaction numbers are only allowed on a replica set member");
+      }),
+      endSession: vi.fn(),
+    });
+    const { PUT } = await loadIdRoute();
+
+    const res = await PUT(
+      req(`http://localhost/api/categories/${VALID_ID}`, "PUT", { name: "NewName" }),
+      { params: Promise.resolve({ id: VALID_ID }) }
+    );
+
+    expect(res.status).toBe(200);
+    // No session on the fallback writes.
+    expect(T().updateMany).toHaveBeenCalledWith(
+      { userId: "64b64b64b64b64b64b64b64b", category: "OldName" },
+      { $set: { category: "NewName" } }
+    );
   });
 
   it("renames the doc AND re-points transactions + budgets old→new", async () => {

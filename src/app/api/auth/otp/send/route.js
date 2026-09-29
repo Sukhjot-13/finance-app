@@ -11,7 +11,7 @@ import {
   popLastHit,
   getClientIp,
 } from "@/lib/rate-limit";
-import { logServerError } from "@/lib/manager";
+import { logServerError, withManagerLogs } from "@/lib/manager/server";
 
 // Sliding-window limits backed by MongoDB (shared across instances).
 const EMAIL_WINDOW_MS = 60 * 60 * 1000; // 1 hour
@@ -32,7 +32,7 @@ async function findUserByEmail(email) {
   return user;
 }
 
-export async function POST(request) {
+async function handlePOST(request) {
   let email;
   try {
     ({ email } = await request.json());
@@ -183,3 +183,8 @@ export async function POST(request) {
     );
   }
 }
+
+// Every verb below is wrapped so the request gets a trace-scoped child
+// logger, a completion entry with the status it actually produced, and a
+// flush scheduled with `after()` once the response completes.
+export const POST = withManagerLogs(handlePOST);

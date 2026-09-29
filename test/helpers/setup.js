@@ -19,6 +19,14 @@ globalThis.__models = makeModelsRegistry();
 
 globalThis.__dbConnect = vi.fn(async () => ({}));
 
+/**
+ * Callbacks handed to `next/server`'s `after()`. `after` has no meaning
+ * outside a Next request scope, so the manager suite captures them and runs
+ * them explicitly — that is how delivery-at-request-completion is verified
+ * without booting a server.
+ */
+globalThis.__afterCallbacks = [];
+
 globalThis.__cookiesStore = vi.fn(() => ({
   get: vi.fn(() => undefined),
   set: vi.fn(),

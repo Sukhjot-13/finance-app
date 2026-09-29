@@ -5,12 +5,12 @@ import { verifySession } from "@/lib/auth";
 import mongoose from "mongoose";
 import { NextResponse } from "next/server";
 import { AMOUNT_MINOR_EXPR, fromMinorUnits } from "@/lib/money";
-import { logServerError } from "@/lib/manager";
+import { logServerError, withManagerLogs } from "@/lib/manager/server";
 
 /** Minimum gap between recurring materialization passes, per user. */
 const RECURRING_THROTTLE_MS = 60 * 1000;
 
-export async function GET(req) {
+async function handleGET(req) {
   // Full session check so server-side revocation applies here too
   const { user, status } = await verifySession();
   if (!user) {
@@ -162,3 +162,8 @@ async function maybeMaterializeRecurring(userId) {
     // Ignored by design.
   }
 }
+
+// Every verb below is wrapped so the request gets a trace-scoped child
+// logger, a completion entry with the status it actually produced, and a
+// flush scheduled with `after()` once the response completes.
+export const GET = withManagerLogs(handleGET);

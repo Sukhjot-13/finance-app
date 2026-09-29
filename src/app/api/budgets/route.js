@@ -4,7 +4,7 @@ import Budget from "@/models/budget.model";
 import { verifySession } from "@/lib/auth";
 import { isValidMonthKey, utcMonthKey } from "@/lib/utils";
 import { MAX_AMOUNT, toMinorUnits } from "@/lib/money";
-import { logServerError } from "@/lib/manager";
+import { logServerError, withManagerLogs } from "@/lib/manager/server";
 
 // Budgets are whole-unit caps (min 1), unlike transaction amounts.
 function coerceBudgetAmount(value) {
@@ -15,7 +15,7 @@ function coerceBudgetAmount(value) {
 }
 
 // GET all budgets for the current month
-export async function GET(req) {
+async function handleGET(req) {
   const { user, status } = await verifySession();
   if (!user)
     return NextResponse.json({ message: "Not authenticated" }, { status: status || 401 });
@@ -38,7 +38,7 @@ export async function GET(req) {
 }
 
 // POST create or update a budget
-export async function POST(req) {
+async function handlePOST(req) {
   const { user, status } = await verifySession();
   if (!user)
     return NextResponse.json({ message: "Not authenticated" }, { status: status || 401 });
@@ -116,7 +116,7 @@ export async function POST(req) {
 }
 
 // DELETE a budget
-export async function DELETE(req) {
+async function handleDELETE(req) {
   const { user, status } = await verifySession();
   if (!user)
     return NextResponse.json({ message: "Not authenticated" }, { status: status || 401 });
@@ -172,3 +172,10 @@ export async function DELETE(req) {
     );
   }
 }
+
+// Every verb below is wrapped so the request gets a trace-scoped child
+// logger, a completion entry with the status it actually produced, and a
+// flush scheduled with `after()` once the response completes.
+export const GET = withManagerLogs(handleGET);
+export const POST = withManagerLogs(handlePOST);
+export const DELETE = withManagerLogs(handleDELETE);

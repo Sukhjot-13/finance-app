@@ -12,7 +12,7 @@ import {
 import { cookies } from "next/headers";
 import dbConnect from "@/lib/mongodb";
 import { recordHitAndCount, resetKey, getClientIp } from "@/lib/rate-limit";
-import { logServerError } from "@/lib/manager";
+import { logServerError, withManagerLogs } from "@/lib/manager/server";
 
 // Brute-force protection, backed by MongoDB so it is shared across
 // instances and survives restarts. 5 failed attempts per email inside a
@@ -41,7 +41,7 @@ async function findUserByEmail(email) {
   return user;
 }
 
-export async function POST(req) {
+async function handlePOST(req) {
   // Parse inside try: a malformed body must be a controlled 400, never an
   // unhandled throw that surfaces as a framework 500.
   let email;
@@ -180,3 +180,8 @@ export async function POST(req) {
     return sendError("An internal server error occurred.", 500);
   }
 }
+
+// Every verb below is wrapped so the request gets a trace-scoped child
+// logger, a completion entry with the status it actually produced, and a
+// flush scheduled with `after()` once the response completes.
+export const POST = withManagerLogs(handlePOST);

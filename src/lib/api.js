@@ -45,11 +45,13 @@ const refreshSingleFlight = () => {
 };
 
 const api = async (url, options = {}) => {
+  // Whether THIS call already burned its single refresh+retry. Tracked in a
+  // local, not written back onto `options`: the caller owns that object, and it
+  // is also what gets handed to `fetch` (and to the Manager SDK's fetch
+  // wrapper), so stamping our own bookkeeping onto it would leak a non-standard
+  // property into the request and leak state into a reused options object.
+  let retried = false;
   const doFetch = () => fetch(url, options);
-  const markRetried = () => {
-    // Guard flag: this request has already had its one refresh+retry.
-    options._authRetried = true;
-  };
 
   let res = await doFetch();
 
@@ -58,7 +60,7 @@ const api = async (url, options = {}) => {
   }
 
   // Already retried once — hand back the 401 rather than looping forever.
-  if (options._authRetried) {
+  if (retried) {
     return res;
   }
 
@@ -66,7 +68,7 @@ const api = async (url, options = {}) => {
   // exactly once when it settles.
   if (isRefreshing) {
     await new Promise((resolve, reject) => failedQueue.push({ resolve, reject }));
-    markRetried();
+    retried = true;
     return doFetch();
   }
 
@@ -103,7 +105,7 @@ const api = async (url, options = {}) => {
     throw outcome.error;
   }
 
-  markRetried();
+  retried = true;
   return doFetch();
 };
 

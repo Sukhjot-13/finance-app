@@ -4,9 +4,9 @@ import { sendSuccess, sendError } from "@/lib/server-utils";
 import { verifyToken } from "@/lib/auth";
 import User from "@/models/user.model";
 import dbConnect from "@/lib/mongodb";
-import { logServerError } from "@/lib/manager";
+import { logServerError, withManagerLogs } from "@/lib/manager/server";
 
-export async function POST(req) {
+async function handlePOST(req) {
   const cookieStore = await cookies();
   const refreshToken = cookieStore.get("refreshToken")?.value;
 
@@ -54,3 +54,8 @@ export async function POST(req) {
     revoked: true,
   });
 }
+
+// Every verb below is wrapped so the request gets a trace-scoped child
+// logger, a completion entry with the status it actually produced, and a
+// flush scheduled with `after()` once the response completes.
+export const POST = withManagerLogs(handlePOST);
