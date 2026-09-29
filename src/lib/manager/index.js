@@ -52,9 +52,7 @@ function clean(value) {
  */
 const CLIENT_ENDPOINT = clean(process.env.NEXT_PUBLIC_MANAGER_ENDPOINT);
 const CLIENT_APP_ID = clean(process.env.NEXT_PUBLIC_MANAGER_APP_ID);
-const CLIENT_LOG_KEY = clean(
-  process.env.NEXT_PUBLIC_MANAGER_CLIENT_KEY ?? process.env.NEXT_PUBLIC_MANAGER_LOG_KEY
-);
+const CLIENT_LOG_KEY = clean(process.env.NEXT_PUBLIC_MANAGER_CLIENT_KEY);
 const CLIENT_ANALYTICS_KEY = clean(process.env.NEXT_PUBLIC_MANAGER_ANALYTICS_KEY);
 
 /** Everything ManagerProvider needs. Separate from `managerConfig` by design. */
