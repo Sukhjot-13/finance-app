@@ -20,7 +20,7 @@ A Next.js 16 personal finance tracking application with OTP-based authentication
 | `/eslint.config.mjs` | ESLint configuration |
 | `/jsconfig.json` | JavaScript/Next.js path aliases (@/ maps to ./src) |
 | `/capacitor.config.ts` | Capacitor iOS configuration (points to `https://fintrack.vistaenvision.com`, dark status bar, safe area handling, configurable via `CAPACITOR_SERVER_URL`) |
-| `/README.md` | Project documentation |
+| `/README.md` | Setup, complete required/optional environment tables, Manager key separation, local-tool options and native wrapper configuration (updated 2026-09-30) |
 | `/appMigration.md` | iOS app migration guide & workflow (Next.js + Capacitor + Xcode) |
 | `/docs/architecture.md` | Project architecture documentation |
 | `/docs/appsteps.md` | Complete log of all iOS installation steps, passwords/prompts, and credentials used |
@@ -388,13 +388,12 @@ Define all of these in a `.env.local` file at the project root.
 | `EMAIL_FROM` | Verified sender email for Brevo | `src/app/api/auth/otp/send/route.js` |
 | `ACCESS_TOKEN_SECRET` | JWT secret for access tokens (15min expiry) | `src/lib/auth.js` (`getAccessSecret`) |
 | `REFRESH_TOKEN_SECRET` | JWT secret for refresh tokens (30d expiry, rotated on use) | `src/lib/auth.js` (`getRefreshSecret`), `src/app/api/auth/refresh/route.js`, `src/app/api/auth/logout/route.js`, `src/app/api/auth/logout-all/route.js` (direct `verifyToken`/`jwt.verify` calls read `process.env` at request time), **`src/proxy.js` (`hasValidSession` — must be present in the BUILD environment; without it the proxy fails closed)** |
-| `JWT_SECRET` | Reserved/unused — no `src/` references (grep 2026-09-26); kept in README template only | — |
 | `NODE_ENV` | Environment mode (`development` adds `'unsafe-eval'` to CSP script-src; controls cookie `secure` flags; `SimpleChart` dev-only error detail) | `src/proxy.js`, auth routes (`refresh`, `otp/verify`), `src/components/SimpleChart.js` |
 | `CAPACITOR_SERVER_URL` | (Optional) Overrides the target URL loaded by the iOS app (defaults to `https://fintrack.vistaenvision.com`) | `capacitor.config.ts` |
 | `MANAGER_ENDPOINT` | (Optional) Base URL of the **Manager** deployment (its own port, e.g. `http://127.0.0.1:3300` — not this app's dev port). All three of endpoint + app id + log key are required before the integration enables itself. | `src/lib/manager/config.js` → `managerConfig` |
 | `MANAGER_APP_ID` | (Optional) Project slug in Manager (`finance-app`). | `src/lib/manager/config.js` → `managerConfig` |
 | `MANAGER_LOG_KEY` | (Optional) Project **server** log key (`mlk_…`). | `src/lib/manager/config.js` → `managerConfig` |
-| `MANAGER_ANALYTICS_KEY` | (Optional) Analytics key (`mak_…`) for the injected tracker `<script>`. | `src/lib/manager/config.js` → `managerConfig` |
+| `MANAGER_ANALYTICS_KEY` | Optional server config field; required by the live checker for analytics acceptance. Browser tracker uses NEXT_PUBLIC_MANAGER_ANALYTICS_KEY instead. | `src/lib/manager/config.js`, `scripts/check-manager-integration.mjs` |
 | `NEXT_PUBLIC_MANAGER_ENDPOINT` | (Optional, browser) Same value as `MANAGER_ENDPOINT`. **Required for the browser half** — Next.js only inlines `NEXT_PUBLIC_*` into the client bundle, so `process.env.MANAGER_*` is always empty in browser code. Also appended to the page CSP `connect-src`. | `src/lib/manager/config.js` → `managerClientConfig`; `src/proxy.js` → `buildCsp` |
 | `NEXT_PUBLIC_MANAGER_APP_ID` | (Optional, browser) Same value as `MANAGER_APP_ID`. Same client-bundle constraint. | `src/lib/manager/config.js` → `managerClientConfig` |
 | `NEXT_PUBLIC_MANAGER_CLIENT_KEY` | (Optional, browser) Project **client** log key (`mck_…`). Manager derives each entry's `source` from the key kind, so browser entries must carry the client key. | `src/lib/manager/config.js` → `managerClientConfig` |
@@ -402,11 +401,19 @@ Define all of these in a `.env.local` file at the project root.
 | `VERCEL_GIT_COMMIT_SHA` / `GIT_SHA` | (Optional) Manager `release` label on the server; falls back to `'dev'`. | `src/lib/manager/server.js` → `startManagerLogger` |
 | `NEXT_PUBLIC_RELEASE` | (Optional) Manager `release` label in the browser; falls back to `'web'`. | `src/lib/manager/ManagerProvider.jsx` |
 
+### Standalone tool variables
+
+| Variable | Purpose | Referenced In |
+|---|---|---|
+| `MANAGER_CLIENT_KEY` | Checker-only client-key alternative; browser requires public key | `scripts/check-manager-integration.mjs` |
+| `APP_ORIGIN` / `APP_COOKIE` / `APP_ORIGIN_DEGRADED` | Checker's app target, optional authenticated session and optional outage instance | `scripts/check-manager-integration.mjs` |
+| `MANAGER_MODULE` / `MEASURE_CHUNK` / `MEASURE_GAP_MS` | Delivery measurement module override and pacing | `scripts/measure-log-delivery.mjs` |
+
 ### Generating JWT Secrets
 ```bash
 openssl rand -base64 32
 ```
-Run 3 times — one for each of `ACCESS_TOKEN_SECRET`, `REFRESH_TOKEN_SECRET`, and `JWT_SECRET`.
+Run twice — generate a different value for each of `ACCESS_TOKEN_SECRET` and `REFRESH_TOKEN_SECRET`. `JWT_SECRET` is unused.
 
 ### Setup Brevo
 1. Sign up at [Brevo](https://www.brevo.com/) (formerly Sendinblue)
@@ -579,3 +586,7 @@ what was real versus mocked, and the cleanup performed.
 - `test/suites/manager-config.suite.js`: provider mounts track and shut down each reset SDK module registry and use a local fetch stub. `test/suites/manager-server.suite.js` also closes reset module registries; SDK redaction and browser suite hooks close logger instances and clear shared offline storage. This prevents orphaned test loggers from contaminating later batching assertions.
 
 - `src/lib/api.js` / `api` and `src/app/(main)/profile/page.js` / `handleLogoutAll`: preserve full reloads at expired-session/logout boundaries to clear in-memory user data; targeted lint comments document why SPA navigation is unsuitable for these two redirects.
+
+- `.env.example`: placeholder-only complete application/Manager template and commented optional native, release and standalone-tool settings (updated 2026-09-30). No functions.
+
+Documentation synchronization (2026-09-30): `README.md` and the Environment Variables inventory describe the current required/optional configuration and tools. `docs/suggestions.md` records the completed documentation update; no executable functions or runtime behavior changed.

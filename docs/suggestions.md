@@ -280,3 +280,7 @@ Packaged FinTrack as a native iOS app using Capacitor 8 with Swift Package Manag
 - **Implemented: complete fallback telemetry.** Dashboard recurring failures and swallowed limiter errors are now recorded under the active request trace. Completion logging cannot replace a successful response, explicit outcomes survive, and intentional redirects are not reported as failures.
 - **Implemented: deterministic verification.** SDK transport, redaction, browser and reset-module provider/server tests isolate persisted offline queues and orphaned logger registries and assert exact 100-entry batch splitting. Five real MongoDB regressions cover the behavior mocked models missed. The CLI probe distinguishes unknown credentials from actual revocation.
 - **Implemented: dependency security updates.** Compatible Next/Mongoose and transitive updates, plus a scoped patched UUID override, bring `npm audit` to zero findings. Native Xcode project parsing/UUID-v4 generation and production browser flows verify compatibility.
+
+## Implemented documentation update — 2026-09-30
+
+Required, feature-specific and optional environment settings are now listed in README against the current code, including standalone helpers and deployment/rebuild behavior. Fresh database setup and public/private Manager key separation are documented; obsolete provider/secret names are identified. No runtime configuration or credentials changed.

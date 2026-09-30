@@ -60,36 +60,33 @@ Make sure you have the following software installed on your machine:
 
 ## 🔑 Environment Variables
 
-To run this project, you will need to add the following environment variables to your `.env.local` file:
+Copy [`.env.example`](.env.example) to `.env.local` locally, or set these in
+Finance's hosted project environment. Give this app its own MongoDB database and
+independent signing secrets. All values below are placeholders.
 
-- `MONGODB_URI`: Your MongoDB connection string.
-  _Example: `mongodb+srv://user:password@cluster.mongodb.net/fintrack_db?retryWrites=true&w=majority`_
+### Required for normal app use
 
-- `BREVO_API_KEY`: Your API key from [Brevo](https://www.brevo.com/) (formerly Sendinblue) for sending transactional emails (OTPs).
+| Variable | Purpose |
+|---|---|
+| `MONGODB_URI` | MongoDB connection including Finance's database name, e.g. `fintrack_db`; also stores rate-limit records. |
+| `ACCESS_TOKEN_SECRET` | Access-token signing secret, at least 32 characters. |
+| `REFRESH_TOKEN_SECRET` | Different refresh-token signing secret, at least 32 characters. Also supply at build time for protected-page proxy checks. |
+| `BREVO_API_KEY` | Brevo transactional email key for OTP login. |
+| `EMAIL_FROM` | Verified Brevo sender email address. Finance uses this name; Resume Builder uses `BREVO_SENDER_EMAIL`. |
 
-- `EMAIL_FROM`: The email address that will be used as the sender for OTP emails.
-  _Example: `noreply@fintrack.com`_
+Generate the two signing secrets separately with `openssl rand -hex 32`.
+`JWT_SECRET` is unused and is not needed.
 
-- `ACCESS_TOKEN_SECRET`: A long, random, and secret string used to sign access tokens. You can generate one using `openssl rand -base64 32`.
-
-- `REFRESH_TOKEN_SECRET`: A long, random, and secret string used to sign refresh tokens. You can generate one using `openssl rand -base64 32`.
-
-- `JWT_SECRET`: A long, random, and secret string used to sign JWT tokens. You can generate one using `openssl rand -base64 32`.
-
-#### Example `.env.local` file:
-
-```
-MONGODB_URI=your_mongodb_connection_string
-BREVO_API_KEY=your_brevo_api_key
-EMAIL_FROM=your_sender_email@example.com
-ACCESS_TOKEN_SECRET=your_super_secret_access_token_string
-REFRESH_TOKEN_SECRET=your_super_secret_refresh_token_string
-JWT_SECRET="your_super_secret_JWT_token_string"
-
+```dotenv
+MONGODB_URI=mongodb+srv://USER:PASSWORD@CLUSTER/fintrack_db?retryWrites=true&w=majority
+ACCESS_TOKEN_SECRET=REPLACE_WITH_RANDOM_ACCESS_SECRET
+REFRESH_TOKEN_SECRET=REPLACE_WITH_DIFFERENT_REFRESH_SECRET
+BREVO_API_KEY=REPLACE_WITH_BREVO_KEY
+EMAIL_FROM=noreply@example.com
 ```
 
-A complete template (including the optional Manager block below) lives in
-[`.env.example`](.env.example).
+No permissions/roles seed is needed for a fresh Finance database. Users, financial
+records and indexes are created through the normal application/model lifecycle.
 
 ### Optional: Manager (centralized logging + analytics)
 
@@ -99,13 +96,14 @@ integration is a set of no-ops, so local development, CI and previews are unaffe
 
 | Variable | Required for | Value |
 |---|---|---|
-| `MANAGER_ENDPOINT` | logs + analytics | base URL of the **Manager** deployment — not this app's own port |
-| `MANAGER_APP_ID` | logs + analytics | project slug in Manager |
+| `MANAGER_ENDPOINT` | server logs | base URL of the **Manager** deployment — not this app's own port |
+| `MANAGER_APP_ID` | server logs | project slug in Manager |
 | `MANAGER_LOG_KEY` | server logs | `mlk_…` **server** key — server-only, never a `NEXT_PUBLIC_` value |
 | `NEXT_PUBLIC_MANAGER_ENDPOINT` | browser logs + analytics | same value as `MANAGER_ENDPOINT` |
 | `NEXT_PUBLIC_MANAGER_APP_ID` | browser logs + analytics | same value as `MANAGER_APP_ID` |
 | `NEXT_PUBLIC_MANAGER_CLIENT_KEY` | browser logs | `mck_…` **client** key |
 | `NEXT_PUBLIC_MANAGER_ANALYTICS_KEY` | analytics | `mak_…` analytics key |
+| `MANAGER_ANALYTICS_KEY` | `manager:check` | same `mak_…` key as the public analytics value; the browser tracker reads `NEXT_PUBLIC_MANAGER_ANALYTICS_KEY` |
 
 There is no `MANAGER_LOG_SOURCE`: Manager derives each entry's `source` from the key
 kind, so the key you use already decides whether a row is a `server` or `client` row.
@@ -126,9 +124,47 @@ Use the project's **client** key (`mck_…`) there. Reusing `mlk_…` would leak
 key to every visitor; Manager derives an entry's `source` from the key kind, so browser
 entries must carry the client key.
 
-`MANAGER_ENDPOINT` is Manager's own base URL (`http://127.0.0.1:3300` for a local Manager).
-It is easy to get backwards and point it at this app's dev port, which makes every log
-POST fail silently.
+`MANAGER_ENDPOINT` is Manager's own base URL (`http://127.0.0.1:3300` when you run
+Manager on port 3300). Manager's regular dev command defaults to 3000, so run it with
+`npm run dev -- --port 3300` in the Manager folder when Finance uses port 3000.
+Point the integration at that Manager origin, not Finance's origin.
+
+### Other optional settings and local tools
+
+| Variable | Purpose / default |
+|---|---|
+| `CAPACITOR_SERVER_URL` | Native iOS wrapper's target site; defaults to `https://fintrack.vistaenvision.com`. Supply when syncing/building a wrapper for another deployment. |
+| `NEXT_PUBLIC_RELEASE` | Browser log release label; defaults to `web`. |
+| `GIT_SHA` | Server log release label if `VERCEL_GIT_COMMIT_SHA` is unavailable; defaults to `dev`. |
+| `MANAGER_CLIENT_KEY` | Checker-only alternative to `NEXT_PUBLIC_MANAGER_CLIENT_KEY`; the browser itself needs the public variable. |
+| `APP_ORIGIN` | Checker's Finance origin; defaults to `http://127.0.0.1:3000`. |
+| `APP_COOKIE` | Checker-only real test session cookie, enabling authenticated checks; absent means those checks are skipped. |
+| `APP_ORIGIN_DEGRADED` | Optional checker target with an unreachable Manager endpoint for outage testing. |
+| `MANAGER_MODULE` | Measurement script's integration-module override; defaults to `../src/lib/manager/index.js`. |
+| `MEASURE_CHUNK` | Measurement entries per paced chunk; defaults to `20`. |
+| `MEASURE_GAP_MS` | Measurement delay between chunks; defaults to `100` ms. |
+
+`NODE_ENV` and `VERCEL_GIT_COMMIT_SHA` are framework/platform-managed, not additional
+secrets. Standalone checker/measurement/migration scripts read shell variables and do
+not load `.env.local` themselves; supply the relevant variables explicitly in the shell.
+
+For all three channels, create the `finance-app` project in Manager and generate its
+own server/client/analytics keys, then set:
+
+```dotenv
+MANAGER_ENDPOINT=https://your-manager-host
+MANAGER_APP_ID=finance-app
+MANAGER_LOG_KEY=mlk_REPLACE_ME
+MANAGER_ANALYTICS_KEY=mak_REPLACE_ME
+NEXT_PUBLIC_MANAGER_ENDPOINT=https://your-manager-host
+NEXT_PUBLIC_MANAGER_APP_ID=finance-app
+NEXT_PUBLIC_MANAGER_CLIENT_KEY=mck_REPLACE_ME
+NEXT_PUBLIC_MANAGER_ANALYTICS_KEY=mak_REPLACE_ME
+```
+
+Restart locally or redeploy after server configuration changes. Rebuild/redeploy for
+public variable changes. Separate databases and signing secrets should be used for
+Manager, Finance and Resume Builder; no server keys belong in browser configuration.
 
 ### Module layout
 
