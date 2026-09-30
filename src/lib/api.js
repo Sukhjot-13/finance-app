@@ -98,6 +98,8 @@ const api = async (url, options = {}) => {
   }
 
   if (outcome?.redirect) {
+    // A full reload clears in-memory user data at the session boundary.
+    // eslint-disable-next-line @next/next/no-location-assign-relative-destination
     window.location.href = "/login";
     throw new Error("Session expired");
   }

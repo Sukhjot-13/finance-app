@@ -60,8 +60,16 @@ describe("rate-limit lib", () => {
     RL.aggregate.mockRejectedValueOnce(new Error("db down"));
     const { recordHit, countRecentHits } = await loadLib();
 
-    await expect(recordHit("k", 1000)).resolves.toBeUndefined();
-    await expect(countRecentHits("k", 1000)).resolves.toBe(0);
+    const manager = await import("@/lib/manager/server");
+    const report = vi.spyOn(manager, "logServerError").mockImplementation(() => {});
+    try {
+      await expect(recordHit("k", 1000)).resolves.toBeUndefined();
+      await expect(countRecentHits("k", 1000)).resolves.toBe(0);
+      expect(report.mock.calls.map(([message]) => message)).toEqual([
+        "Rate-limit recordHit failed", "Rate-limit countRecentHits failed",
+      ]);
+      expect(JSON.stringify(report.mock.calls)).not.toContain('"k"');
+    } finally { report.mockRestore(); }
   });
 
   it("popLastHit/resetKey also fail open on DB errors", async () => {

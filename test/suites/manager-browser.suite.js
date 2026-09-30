@@ -10,7 +10,7 @@
 // would silently leave the wrapper calling the old one.
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
-import { initLogger } from "@/lib/manager/logger";
+import { initLogger, shutdownLoggers } from "@/lib/manager/logger";
 
 const ENDPOINT = "http://127.0.0.1:3300";
 const ORIGIN = "http://localhost:3000";
@@ -26,6 +26,8 @@ describe("manager browser channel", () => {
   let log;
 
   beforeEach(() => {
+    shutdownLoggers();
+    localStorage.removeItem("manager.logger.queue");
     window.history.replaceState({}, "", "/dashboard");
     realFetch = globalThis.fetch;
     batches = [];
@@ -68,6 +70,8 @@ describe("manager browser channel", () => {
     } catch {
       /* an intentionally hanging upload is released below */
     }
+    shutdownLoggers();
+    localStorage.removeItem("manager.logger.queue");
     log = null;
     globalThis.fetch = realFetch;
   });

@@ -7,6 +7,9 @@
 
 ---
 
+The original verification below records the first integration pass. **Section 12 records
+the subsequent independent audit and fixes and is the latest verification result.**
+
 ## 1. Summary
 
 The Finance app already had a Manager integration committed, but it was broken in ways
@@ -327,20 +330,122 @@ itself.
 
 ```bash
 # Manager, isolated local database
-cd ../Manager && npm run dev:local-db          # http://127.0.0.1:3300
+# Start Manager against its own disposable database on port 3300.
+# Use generated test-project credentials; never reuse production data for probes.
 
 # Finance, its own isolated database
 npm test && npm run lint && npm run build
 #   MANAGER_ENDPOINT, MANAGER_APP_ID, MANAGER_LOG_KEY,
 #   MANAGER_CLIENT_KEY, MANAGER_ANALYTICS_KEY, MONGODB_URI
-npm run manager:check \
-  APP_ORIGIN=http://127.0.0.1:3000 \
-  APP_ORIGIN_DEGRADED=http://127.0.0.1:3001 \
-  APP_COOKIE="accessToken=…; refreshToken=…"
+APP_ORIGIN=http://127.0.0.1:3400 \
+APP_ORIGIN_DEGRADED=http://127.0.0.1:3401 \
+APP_COOKIE="accessToken=…; refreshToken=…" \
+npm run manager:check
 node scripts/measure-log-delivery.mjs 200
 ```
 
 Bounded, uniquely named synthetic probes and the browser harness were **not** committed;
 they required a temporary route and a stubbed mail provider, both of which were removed.
-Every assertion they made is now covered permanently by the five `manager-*` suites in
-`test/suites/`.
+The permanent `manager-*` suites cover integration regressions; the browser and
+stored-row assertions are additional verification evidence, not a committed browser suite.
+
+
+---
+
+## 12. Independent audit and fixes (2026-09-29)
+
+This audit started from local commit `0e7c7ff` on `feat/manager-integration`.
+It found gaps despite the original passing report and fixed them inside Finance only.
+No push, merge, deployment, Manager source change or ResumeBuilder change was performed.
+
+### Findings fixed
+
+1. **Recurring transactions could be permanently lost after a write failure.** The
+   schedule used to advance before inserts. Occurrences now become durable first,
+   with the existing unique occurrence index preventing duplicates; `nextRunAt` and
+   `lastRunAt` then advance together under a guarded update. Partial saves, crashes
+   and failed schedule commits leave a retriable schedule. Index initialization is
+   awaited. Only duplicate errors from the occurrence index are treated as success.
+   The existing sparse index suffices; this fix does not require an index migration.
+2. **Swallowed dashboard and rate-limiter failures were absent from Manager.** Both
+   now report errors using the active request trace while preserving their existing
+   fallback behavior. Limiter bucket keys containing email/IP identifiers are omitted.
+3. **Completion logging could replace a valid response if the logger threw.** It now
+   uses guarded logging. Explicit handler outcomes survive automatic completion,
+   and intentional redirects are not mislabeled as uncaught errors.
+4. **The SDK batch test was flaky and retained offline queues.** Transport tests now
+   shut down loggers and clear offline storage between cases. Provider and server
+   tests also close every SDK registry created by module resets, preventing orphaned
+   loggers from contaminating later batches. Provider network calls are locally stubbed;
+   the explicit 100-entry
+   batch limit is asserted deterministically.
+5. **The live checker mislabeled an unknown fake key as revoked.** Its label is
+   corrected. It verifies ingest acceptance and response headers; actual stored rows
+   were inspected separately during the browser run. Revocation contracts remain
+   covered by isolated mocks.
+6. **Dependency audit reported 16 vulnerabilities, including one critical.** Compatible
+   updates include Next 16.3.7 and Mongoose 8.24.4. A scoped `xcode.uuid` override uses
+   11.1.1, preserving its CommonJS UUID-v4 API. esbuild matches Vite's peer range.
+   The existing iOS Xcode project parses and generates valid 24-character IDs.
+   The refreshed lint rules also flagged two intentional session-boundary full reloads;
+   focused comments retain those reloads to clear in-memory user data.
+
+### Independent verification results
+
+| Verification | Result |
+|---|---|
+| Single test runner, `npm test` | **435/435 passed**, including five real-MongoDB recurring regressions |
+| `npm run lint` | Clean |
+| Cleaned production `npm run build` | Successful on Next 16.3.7; login 200 and both removed probe routes 404 |
+| `npm audit` | **0 vulnerabilities** |
+| Real HTTP application flow harness | **31/31 passed** |
+| Live `npm run manager:check` | **21/21 passed**, no skips, including an unreachable-Manager app instance |
+| Chromium UI and stored-Manager-row assertions | **59/59 passed** |
+| Three separate production builds: unconfigured / analytics only / logs only | **27/27 passed** |
+| Server-key scan of complete production output | **0 server-key occurrences** |
+| Capacitor Xcode parser / UUID smoke check | Passed; native project files unchanged |
+
+The final full suite also passed on an immediate repeat after fixing logger isolation.
+jsdom emits its existing unsupported-anchor-navigation diagnostic during component
+tests; this is a harness limitation, with no failed assertion.
+
+The real-database suite verifies multiple manual transactions, occurrence uniqueness
+under four concurrent passes, partial save failure and retry, failed schedule commit
+and retry, and resuming an interrupted pass. It starts its own disposable MongoDB and
+never reads the app's financial database configuration.
+
+HTTP checks exercised OTP verification, cookies, refresh/logout, transactions CRUD,
+categories, budgets, recurring rules, dashboards, CSV exports, invalid inputs and
+cross-user isolation. Chromium exercised authenticated pages, session persistence,
+transaction drawer creation/search/confirmed deletion and logout. Bounded synthetic
+console, uncaught, rejection and failed-fetch errors reached Manager. Handled and
+uncaught server errors reached Manager with stacks and fake secrets redacted. Browser
+and API rows shared a trace; pageviews, clicks and custom analytics events were stored.
+The final integration window contained 35 client logs, 83 server logs and 7 events.
+SDK-download bytes matched Finance's vendored SDK.
+
+### Isolation, limitations and cleanup
+
+- Manager ran its existing production build on port 3300 against a disposable MongoDB
+  on port 27099. Finance ran on ports 3400/3401 with a separate disposable database on
+  port 27188. Generated keys belonged to an isolated synthetic project. No existing
+  project keys, production database, environment files or Manager files were modified.
+- The OTP-send failure was simulated at the browser boundary. Login then used seeded
+  OTP data and the app's real verification endpoint, bcrypt and session cookies.
+  This independently verifies session handling, **not real email delivery**. The real
+  mail package remained installed; no email, bank, payment or AI provider was used.
+- Chromium used a normal Chrome User-Agent because Manager's bot filter rejects
+  `HeadlessChrome`. This is a harness accommodation, not an application change.
+- Native verification was limited to Xcode parsing and UUID generation; no iOS device
+  build was performed. Browser checks do not imply native device coverage.
+- The temporary authenticated diagnostic route required a real session (anonymous
+  requests returned 401). It was removed before the final build. No diagnostic route,
+  auth bypass, stubbed dependency or temporary source-copy directory remains.
+- Verification browsers, HTTP servers and disposable databases were stopped. Generated
+  runtime credentials were deleted. Only source, regression tests, dependency lockfile
+  and documentation changes are committed, locally, on the existing feature branch.
+
+Run `npm test`, `npm run lint`, `npm run build` and `npm audit` to reproduce the permanent
+checks. The first real-database test run may download a MongoDB binary. The ephemeral
+browser/error-injection harness is additional evidence and is not a permanent test
+entry point; repeat such probes only against disposable databases and generated keys.

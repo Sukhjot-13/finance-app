@@ -22,10 +22,15 @@ const setEnv = (values) => {
   }
 };
 
+const sdkShutdowns = new Set();
+
 const loadServer = async () => {
   vi.resetModules();
   delete globalThis.__managerServerLogger;
-  return import("@/lib/manager/server");
+  const server = await import("@/lib/manager/server");
+  const { shutdownLoggers } = await import("@/lib/manager/logger");
+  sdkShutdowns.add(shutdownLoggers);
+  return server;
 };
 
 /**
@@ -68,6 +73,9 @@ describe("manager server channel", () => {
     globalThis.__afterCallbacks = [];
   });
   afterEach(() => {
+    for (const shutdown of sdkShutdowns) shutdown();
+    sdkShutdowns.clear();
+    localStorage.removeItem("manager.logger.queue");
     setEnv({});
     delete globalThis.__managerServerLogger;
     globalThis.__afterCallbacks = [];
@@ -249,6 +257,36 @@ describe("manager server channel", () => {
 
     const completion = entriesOf(root).find((e) => e.message === "request_completed");
     expect(completion.meta).toMatchObject({ outcome: "redirect", status: 303 });
+    expect(entriesOf(root).some(e => e.message === "unhandled_route_error")).toBe(false);
+  });
+
+  it("preserves a reported export outcome for a returned stream response", async () => {
+    setEnv(SERVER_ENV);
+    const { withManagerLogs, reportRequestOutcome } = await loadServer();
+    const root = fakeLogger();
+    globalThis.__managerServerLogger = root;
+    const GET = withManagerLogs(async () => {
+      reportRequestOutcome("export", { status: 200 });
+      return new Response("stream", { headers: { "content-type": "application/octet-stream" } });
+    });
+    await GET(request(), {});
+    expect(entriesOf(root).find(e => e.message === "request_completed").meta)
+      .toMatchObject({ outcome: "export", status: 200 });
+  });
+
+  it("preserves explicit outcomes and a response when completion logging fails", async () => {
+    setEnv(SERVER_ENV);
+    const { withManagerLogs, reportRequestOutcome } = await loadServer();
+    const root = fakeLogger();
+    globalThis.__managerServerLogger = root;
+    const response = Response.json({ ok: true });
+    const GET = withManagerLogs(async (request, context, log) => {
+      reportRequestOutcome("export", { status: 200 });
+      log.info = () => { throw new Error("synthetic logger failure"); };
+      return response;
+    });
+    await expect(GET(request(), {})).resolves.toBe(response);
+    expect(globalThis.__afterCallbacks).toHaveLength(1);
   });
 
   it("records an uncaught exception with its stack and re-throws unchanged", async () => {

@@ -127,6 +127,8 @@ describe("manager SDK transport", () => {
   let log;
 
   beforeEach(async () => {
+    shutdownLoggers();
+    localStorage.removeItem("manager.logger.queue");
     mock = await startMockManager();
   });
 
@@ -137,11 +139,12 @@ describe("manager SDK transport", () => {
       /* the mock may be hung by an outage test */
     }
     log = null;
-    mock.reset();
-    await mock.close();
     // Clears the SDK's pending batch/retry timers, which would otherwise keep
     // firing into later suites.
-    await shutdownLoggers();
+    shutdownLoggers();
+    mock.reset();
+    await mock.close();
+    localStorage.removeItem("manager.logger.queue");
   });
 
   it("delivers entries to /api/ingest/logs with the server key", async () => {
@@ -170,17 +173,16 @@ describe("manager SDK transport", () => {
     await log.flush();
 
     // 20 lines -> ONE request. This is the whole point of the batch window.
-    expect(mock.requests).toHaveLength(1);
-    expect(mock.requests[0].body.logs).toHaveLength(20);
+    expect(mock.requests.map(r => r.body.logs.map(e => e.message)))
+      .toEqual([Array.from({ length: 20 }, (_, i) => `burst_${i}`)]);
   });
 
   it("splits a burst larger than the batch cap, never merging past 100", async () => {
-    log = makeLogger(mock, { flushIntervalMs: 5000 });
+    log = makeLogger(mock, { flushIntervalMs: 5000, maxBatchSize: 100 });
     for (let i = 0; i < 120; i += 1) log.info(`big_${i}`);
     await log.flush();
 
-    expect(mock.requests.length).toBeGreaterThan(1);
-    expect(mock.requests.length).toBeLessThan(10);
+    expect(mock.requests).toHaveLength(2);
     for (const request of mock.requests) expect(request.body.logs.length).toBeLessThanOrEqual(100);
     expect(logEntriesFor(mock).flat().filter((e) => e.message.startsWith("big_"))).toHaveLength(120);
   });
@@ -370,6 +372,8 @@ describe("manager SDK redaction and stacks", () => {
   let log;
 
   beforeEach(async () => {
+    shutdownLoggers();
+    localStorage.removeItem("manager.logger.queue");
     mock = await startMockManager();
   });
   afterEach(async () => {
@@ -379,8 +383,9 @@ describe("manager SDK redaction and stacks", () => {
       /* ignore */
     }
     log = null;
+    shutdownLoggers();
     await mock.close();
-    await shutdownLoggers();
+    localStorage.removeItem("manager.logger.queue");
   });
 
   const sent = () => logEntriesFor(mock).flat();

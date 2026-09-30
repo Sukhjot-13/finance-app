@@ -141,6 +141,7 @@ await Promise.all([
   import("./suites/api-budgets.suite.js"),
   import("./suites/api-reports.suite.js"),
   import("./suites/recurring.suite.js"),
+  import("./suites/recurring-database.suite.js"),
   import("./suites/budget-components.suite.jsx"),
   import("./suites/overlay-components.suite.jsx"),
   import("./suites/page-components.suite.jsx"),

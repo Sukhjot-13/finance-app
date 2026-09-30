@@ -109,6 +109,8 @@ export default function ProfilePage() {
         });
         return;
       }
+      // A full reload clears in-memory user data at the session boundary.
+      // eslint-disable-next-line @next/next/no-location-assign-relative-destination
       window.location.href = "/login";
     } catch (error) {
       console.error(

@@ -234,7 +234,7 @@ export function withManagerLogs(handler) {
     return requestStorage.run(store, async () => {
       try {
         const result = await handler(request, context, log);
-        store.outcome = outcomeOf(result);
+        store.outcome ??= outcomeOf(result);
         return result;
       } catch (error) {
         // A handler that already described its outcome (e.g. a thrown
@@ -242,7 +242,9 @@ export function withManagerLogs(handler) {
         // keeps it; "threw" is only the fallback.
         if (store.outcome === null) store.outcome = { kind: "threw" };
         // Record, then rethrow: the app's error-response policy is unchanged.
-        logWith(log, "error", "unhandled_route_error", { error, route });
+        if (store.outcome.kind !== "redirect") {
+          logWith(log, "error", "unhandled_route_error", { error, route });
+        }
         throw error;
       } finally {
         logCompletion(store, route);
@@ -286,7 +288,7 @@ function safeHeader(response, name) {
 function logCompletion(store, route) {
   const { log, startedAt, outcome } = store;
   if (log === null) return;
-  log.info("request_completed", {
+  logWith(log, "info", "request_completed", {
     route,
     durationMs: Date.now() - startedAt,
     ...(outcome?.status ? { status: outcome.status } : {}),

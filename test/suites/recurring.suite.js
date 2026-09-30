@@ -209,11 +209,13 @@ describe("materializeDueRules (injected fakes, no DB)", () => {
   const makeFakes = ({ rules, now, saveImpl }) => {
     const state = new Map(rules.map((r) => [r._id, { ...r }]));
     const created = [];
+    const attempted = [];
+    const persisted = new Set();
     const fakes = {
-      created,
+      created, attempted,
       state,
       Recurring: {
-        find: vi.fn(async () => rules),
+        find: vi.fn(async () => [...state.values()].filter(r => r.nextRunAt <= now).map(r => ({ ...r }))),
         findOneAndUpdate: vi.fn(async (filter, update) => {
           const current = state.get(filter._id);
           if (!current) return null;
@@ -224,14 +226,24 @@ describe("materializeDueRules (injected fakes, no DB)", () => {
           ) {
             return null;
           }
-          current.nextRunAt = update.$set.nextRunAt;
+          Object.assign(current, update.$set);
           return { ...current };
         }),
         updateOne: vi.fn(async () => ({})),
       },
       Transaction: vi.fn(function (data) {
-        created.push(data);
-        this.save = saveImpl || vi.fn(async () => this);
+        attempted.push(data);
+        Object.assign(this, data);
+        this.save = vi.fn(async () => {
+          const key = `${data.recurringRuleId}:${data.scheduledFor.toISOString()}`;
+          if (persisted.has(key)) throw Object.assign(new Error("duplicate occurrence"), {
+            code: 11000, keyPattern: { recurringRuleId: 1, scheduledFor: 1 },
+          });
+          const result = saveImpl ? await saveImpl.call(this) : this;
+          persisted.add(key);
+          created.push(data);
+          return result;
+        });
       }),
       now,
     };
@@ -257,14 +269,14 @@ describe("materializeDueRules (injected fakes, no DB)", () => {
       currency: "USD",
       recurringRuleId: "rule-1",
     });
-    // Atomic claim, NOT an unconditional $set.
-    const [claimFilter, claimUpdate] =
+    // Conditional schedule commit after all writes, never an unconditional $set.
+    const [commitFilter, commitUpdate] =
       fakes.Recurring.findOneAndUpdate.mock.calls[0];
-    expect(claimFilter).toEqual({
+    expect(commitFilter).toEqual({
       _id: "rule-1",
       nextRunAt: new Date("2026-08-15T00:00:00.000Z"),
     });
-    expect(new Date(claimUpdate.$set.nextRunAt) > now).toBe(true);
+    expect(new Date(commitUpdate.$set.nextRunAt) > now).toBe(true);
   });
 
   it("stamps each occurrence with a distinct scheduledFor", async () => {
@@ -282,44 +294,30 @@ describe("materializeDueRules (injected fakes, no DB)", () => {
     expect(new Set(scheduled).size).toBe(2);
   });
 
-  it("a SECOND concurrent call inserts nothing (stale atomic claim)", async () => {
+  it("a second completed pass inserts nothing", async () => {
     const now = new Date("2026-09-26T00:00:00.000Z");
     const fakes = makeFakes({
       rules: [rule({ nextRunAt: new Date("2026-08-15T00:00:00.000Z") })],
       now,
     });
 
-    // Two passes racing on the same freshly-read nextRunAt. The second one
-    // reads the state left by the first, so its guard is stale.
+    // The second pass reads the future schedule committed by the first.
     const first = await materializeDueRules(VALID_ID, fakes);
     const second = await materializeDueRules(VALID_ID, fakes);
 
     expect(first).toBe(2);
     // The rule's nextRunAt is now in the future, so the second pass plans
-    // zero occurrences and never even attempts a claim.
+    // zero occurrences and never attempts another schedule commit.
     expect(second).toBe(0);
     expect(fakes.created).toHaveLength(2);
   });
 
-  it("a losing claim (findOneAndUpdate → null) inserts NOTHING", async () => {
+  it("a stale schedule commit does not erase durable occurrences", async () => {
     const now = new Date("2026-09-26T00:00:00.000Z");
-    const created = [];
-    const fakes = {
-      Recurring: {
-        find: vi.fn(async () => [rule({ nextRunAt: new Date("2026-08-15T00:00:00.000Z") })]),
-        // Simulates losing the race: the guard matched nothing.
-        findOneAndUpdate: vi.fn(async () => null),
-        updateOne: vi.fn(async () => ({})),
-      },
-      Transaction: vi.fn(function (data) {
-        created.push(data);
-        this.save = vi.fn(async () => this);
-      }),
-      now,
-    };
-
-    expect(await materializeDueRules(VALID_ID, fakes)).toBe(0);
-    expect(created).toHaveLength(0);
+    const fakes = makeFakes({ rules: [rule({ nextRunAt: new Date("2026-08-15T00:00:00.000Z") })], now });
+    fakes.Recurring.findOneAndUpdate.mockResolvedValue(null);
+    expect(await materializeDueRules(VALID_ID, fakes)).toBe(2);
+    expect(fakes.created).toHaveLength(2);
     expect(fakes.Recurring.updateOne).not.toHaveBeenCalled();
   });
 
@@ -334,7 +332,7 @@ describe("materializeDueRules (injected fakes, no DB)", () => {
       saveImpl: vi.fn(async function () {
         saves += 1;
         if (saves === 2) {
-          throw Object.assign(new Error("E11000 duplicate key"), { code: 11000 });
+          throw Object.assign(new Error("E11000 duplicate key"), { code: 11000, keyPattern: { recurringRuleId: 1, scheduledFor: 1 } });
         }
         return this;
       }),
@@ -342,7 +340,7 @@ describe("materializeDueRules (injected fakes, no DB)", () => {
 
     const count = await materializeDueRules(VALID_ID, fakes);
     expect(count).toBe(1);
-    expect(fakes.created).toHaveLength(2);
+    expect(fakes.attempted).toHaveLength(2);
   });
 
   it("re-throws a non-duplicate insert failure", async () => {
@@ -355,6 +353,18 @@ describe("materializeDueRules (injected fakes, no DB)", () => {
       }),
     });
     await expect(materializeDueRules(VALID_ID, fakes)).rejects.toThrow("disk on fire");
+    expect(fakes.state.get("rule-1").nextRunAt).toEqual(new Date("2026-08-15T00:00:00.000Z"));
+    expect(fakes.Recurring.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it("does not swallow duplicate-key failures from an unrelated index", async () => {
+    const fakes = makeFakes({
+      rules: [rule({ nextRunAt: new Date("2026-08-15T00:00:00.000Z") })],
+      now: new Date("2026-09-26T00:00:00.000Z"),
+      saveImpl: async () => { throw Object.assign(new Error("other unique index"), { code: 11000, keyPattern: { description: 1 } }); },
+    });
+    await expect(materializeDueRules(VALID_ID, fakes)).rejects.toThrow("other unique index");
+    expect(fakes.Recurring.findOneAndUpdate).not.toHaveBeenCalled();
   });
 
   it("caps long absences at MAX_CATCH_UP_RUNS but still advances past now", async () => {

@@ -16,6 +16,12 @@
 
 import dbConnect from "@/lib/mongodb";
 import RateLimit from "@/models/ratelimit.model";
+import { logServerError } from "@/lib/manager/server";
+
+function reportRateLimitError(operation, error) {
+  console.error(`rate-limit ${operation} error:`, error?.message);
+  logServerError(`Rate-limit ${operation} failed`, error);
+}
 
 /**
  * Records one hit for `key`. Keeps at most the last 100 timestamps per key.
@@ -33,7 +39,7 @@ export async function recordHit(key, windowMs) {
       { upsert: true }
     );
   } catch (error) {
-    console.error("rate-limit recordHit error:", error.message);
+    reportRateLimitError("recordHit", error);
   }
 }
 
@@ -62,7 +68,7 @@ export async function countRecentHits(key, windowMs) {
     ]);
     return result[0]?.n || 0;
   } catch (error) {
-    console.error("rate-limit countRecentHits error:", error.message);
+    reportRateLimitError("countRecentHits", error);
     return 0;
   }
 }
@@ -148,7 +154,7 @@ export async function recordHitAndCount(key, windowMs, max) {
     const count = result[0]?.n || 0;
     return { allowed: count <= max, count };
   } catch (error) {
-    console.error("rate-limit recordHitAndCount error:", error.message);
+    reportRateLimitError("recordHitAndCount", error);
     return { allowed: true, count: 0 };
   }
 }
@@ -162,7 +168,7 @@ export async function popLastHit(key) {
     await dbConnect();
     await RateLimit.updateOne({ key }, { $pop: { hits: 1 } });
   } catch (error) {
-    console.error("rate-limit popLastHit error:", error.message);
+    reportRateLimitError("popLastHit", error);
   }
 }
 
@@ -174,6 +180,6 @@ export async function resetKey(key) {
     await dbConnect();
     await RateLimit.deleteOne({ key });
   } catch (error) {
-    console.error("rate-limit resetKey error:", error.message);
+    reportRateLimitError("resetKey", error);
   }
 }

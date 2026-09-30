@@ -166,14 +166,14 @@ check(
 // ---------------------------------------------------------------------------
 process.stdout.write("\n3. rejected credentials / payloads are REPORTED, not just 200\n");
 
-// A revoked credential is exercised with a disposable fake: revoking a real
-// key would break every other consumer of it.
+// This is a second unknown credential, not a previously valid revoked key.
+// Actual revoked-key semantics are covered by isolated contract tests.
 const revoked = await post(
   "/api/ingest/logs",
   { logs: [{ level: "info", message: "nope" }] },
   "mlk_revoked_for_this_check"
 );
-check("revoked/unknown-style key is refused with 401", revoked.status === 401, `status ${revoked.status}`);
+check("second unknown key is refused with 401", revoked.status === 401, `status ${revoked.status}`);
 
 const tooOld = await post(
   "/api/ingest/logs",

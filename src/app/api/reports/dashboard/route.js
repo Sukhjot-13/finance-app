@@ -52,8 +52,8 @@ async function handleGET(req) {
 
     // Materialize due recurring rules on normal app use, not just at login.
     // Throttled per user (default 60s) via the RateLimit collection, and the
-    // work is fire-and-forget relative to the response so the dashboard is
-    // never slowed by it.
+    // work completes before aggregation so newly materialized rows appear
+    // in this response. Failures remain best effort and are logged.
     await maybeMaterializeRecurring(user._id);
 
     // Aggregations. All $sum run over INTEGER minor units; the single
@@ -147,7 +147,7 @@ async function handleGET(req) {
  * RateLimit collection as a per-user cooldown so a user idling on the
  * dashboard doesn't re-scan their rules on every request. Any failure is
  * swallowed: a recurring hiccup must never break the dashboard. Losing the
- * race is harmless — materialization is idempotent (atomic claim + unique
+ * race is harmless — materialization is idempotent (durable occurrences + unique
  * index in src/lib/recurring.js), so a double pass inserts nothing extra.
  */
 async function maybeMaterializeRecurring(userId) {
@@ -158,8 +158,10 @@ async function maybeMaterializeRecurring(userId) {
     await recordHit(key, RECURRING_THROTTLE_MS);
     const { materializeDueRules } = await import("@/lib/recurring");
     await materializeDueRules(userId);
-  } catch {
-    // Ignored by design.
+  } catch (error) {
+    logServerError("Recurring materialization on dashboard failed", error, {
+      route: "GET /api/reports/dashboard",
+    });
   }
 }
 

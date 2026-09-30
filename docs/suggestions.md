@@ -273,3 +273,10 @@ Replaced the generic light gray/slate template ("AI slop") with an ultra-sleek, 
 
 Packaged FinTrack as a native iOS app using Capacitor 8 with Swift Package Manager and Xcode 26. Configured to load the production Vercel deployment (`https://fintrack.vistaenvision.com`) with local testing override support (`CAPACITOR_SERVER_URL`), dark theme status bar, full-bleed viewport (`viewportFit: cover`), and Dynamic Island / notch safe-area handling (`pt-safe`/`pb-safe`). *(Completed — kept here for history only.)*
 
+
+## Independent review fixes — 2026-09-29
+
+- **Implemented: recurring retry safety.** Advancing the schedule before inserts permanently skipped occurrences after failed or interrupted writes. Durable unique writes now precede a guarded schedule commit. This supersedes the earlier pre-insert claim design described above; no production index migration is required for this fix.
+- **Implemented: complete fallback telemetry.** Dashboard recurring failures and swallowed limiter errors are now recorded under the active request trace. Completion logging cannot replace a successful response, explicit outcomes survive, and intentional redirects are not reported as failures.
+- **Implemented: deterministic verification.** SDK transport, redaction, browser and reset-module provider/server tests isolate persisted offline queues and orphaned logger registries and assert exact 100-entry batch splitting. Five real MongoDB regressions cover the behavior mocked models missed. The CLI probe distinguishes unknown credentials from actual revocation.
+- **Implemented: dependency security updates.** Compatible Next/Mongoose and transitive updates, plus a scoped patched UUID override, bring `npm audit` to zero findings. Native Xcode project parsing/UUID-v4 generation and production browser flows verify compatibility.

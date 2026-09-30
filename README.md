@@ -24,7 +24,7 @@ Follow these instructions to get a copy of the project up and running on your lo
 
 Make sure you have the following software installed on your machine:
 
-- [Node.js](https://nodejs.org/en/) (v18 or later recommended)
+- [Node.js](https://nodejs.org/en/) (v22.12+; v24 recommended)
 - [npm](https://www.npmjs.com/) or [yarn](https://yarnpkg.com/)
 - [MongoDB](https://www.mongodb.com/try/download/community) (or a MongoDB Atlas account)
 
@@ -219,7 +219,7 @@ npm run manager:check
 | 2 | analytics cannot write logs; server and client keys cannot write events; unknown keys get a generic `401` |
 | 3 | rejection is **counted** (`accepted`/`rejected`), and stale/future timestamps, bad levels and client-sent Manager-owned fields are all refused |
 | 4 | the SDK download is authenticated by header only, and an analytics key cannot fetch it |
-| 5 | this app's own routes really deliver logs, and a protected route still rejects an anonymous caller |
+| 5 | Finance responds correctly and accepts a trace header; independently inspect stored Manager rows to prove delivery and trace adoption |
 | 6 | with `APP_ORIGIN_DEGRADED` pointing at an instance whose `MANAGER_ENDPOINT` is unreachable, the app still serves and does not block |
 
 ```bash
@@ -389,3 +389,15 @@ This project uses ESLint for linting. To run the linter, use the following comma
 ```bash
 npm run lint
 ```
+
+### Independent verification regressions
+
+`npm test` includes an isolated real MongoDB suite for recurring occurrence indexes,
+concurrent runs, partial write failures and interrupted retries. The test database is
+created and destroyed automatically; it never uses your financial `MONGODB_URI`.
+The first run may download MongoDB's test binary. Recurring schedules now advance only
+after durable writes, so a failed write can be retried without losing or duplicating
+transactions. Dashboard and rate-limiter fallback errors are also sent to Manager.
+
+Runtime/security dependencies are refreshed in the lockfile. The `xcode.uuid` override
+keeps Capacitor's existing UUID-v4 usage on a patched compatible implementation.

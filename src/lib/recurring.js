@@ -4,14 +4,11 @@
 // Rules materialize into Transaction documents when the user is logged in and
 // uses the app (see api/auth/otp/verify and api/reports/dashboard).
 // advanceRuleDate is pure and unit-tested; materializeDueRules takes injectable
-// models so tests never touch MongoDB.
+// models so tests can isolate failures; database regressions use a disposable MongoDB.
 //
-// IDEMPOTENCY: every occurrence is claimed by an ATOMIC conditional update
-// (findOneAndUpdate guarded on the exact `nextRunAt` the caller read) BEFORE
-// any insert. Two concurrent callers therefore cannot both materialize the
-// same occurrence: the second one's guard no longer matches and it skips. The
-// unique sparse index on (recurringRuleId, scheduledFor) is the second line of
-// defence — a duplicate-key error is treated as "already materialized".
+// IDEMPOTENCY: the unique (recurringRuleId, scheduledFor) index guards each
+// durable occurrence. Advance nextRunAt only AFTER all planned writes succeed.
+// A failed or interrupted pass stays due; retries skip already-written rows.
 import { toMinorUnits } from "@/lib/money";
 
 /** Max catch-up occurrences per rule per pass (bounds long absences). */
@@ -63,10 +60,8 @@ export function firstRunDate({ frequency, dayOfMonth, dayOfWeek }, from = new Da
  * Materialize every due occurrence of the user's active rules into
  * Transactions, advancing each rule's nextRunAt past now.
  *
- * Concurrency-safe: the nextRunAt advance is an atomic claim taken BEFORE
- * inserting, so a second concurrent pass finds its guard stale and inserts
- * nothing. A duplicate-key (E11000) insert rejection is likewise treated as
- * "already materialized" rather than an error.
+ * Concurrent passes rely on occurrence uniqueness, then conditionally advance
+ * the schedule they read. A save/commit failure leaves the rule due for retry.
  *
  * @returns number of transactions created.
  */
@@ -88,11 +83,16 @@ export async function materializeDueRules(userId, deps = {}) {
   const rules =
     query && typeof query.lean === "function" ? await query.lean() : await query;
 
+  // Mongoose starts index creation asynchronously. Wait before relying on the
+  // occurrence guard, including the very first request to a fresh database.
+  if (rules?.length && typeof TransactionModel.init === "function") {
+    await TransactionModel.init();
+  }
+
   let created = 0;
   for (const rule of rules || []) {
-    // Plan the whole run first so the claim can be a SINGLE $set of the
-    // final nextRunAt. Nothing is lost if the claim fails: the plan is
-    // recomputed from the same inputs on the next pass.
+    // Plan the whole run before writing. The schedule moves only after every
+    // occurrence is durable; a failed pass is recomputed on the next request.
     const runAts = [];
     let cursor = new Date(rule.nextRunAt);
     let planned = 0;
@@ -107,16 +107,6 @@ export async function materializeDueRules(userId, deps = {}) {
     }
     const precomputedNext = cursor;
     if (runAts.length === 0) continue;
-
-    // ATOMIC CLAIM. The filter pins the exact nextRunAt this caller read, so
-    // a concurrent pass that already advanced the rule makes this match
-    // nothing and we skip the inserts entirely.
-    const claimed = await RecurringModel.findOneAndUpdate(
-      { _id: rule._id, nextRunAt: rule.nextRunAt },
-      { $set: { nextRunAt: precomputedNext } },
-      { new: true }
-    );
-    if (!claimed) continue;
 
     for (const runAt of runAts) {
       try {
@@ -136,14 +126,22 @@ export async function materializeDueRules(userId, deps = {}) {
       } catch (error) {
         // The unique (recurringRuleId, scheduledFor) index rejected a
         // duplicate: this occurrence is already materialized. Not an error.
-        if (error && error.code === 11000) continue;
+        if (
+          error?.code === 11000 &&
+          error.keyPattern?.recurringRuleId === 1 &&
+          error.keyPattern?.scheduledFor === 1
+        ) continue;
         throw error;
       }
     }
 
-    await RecurringModel.updateOne(
-      { _id: rule._id },
-      { $set: { lastRunAt: runAts[runAts.length - 1] } }
+    // Commit only after durable writes. A stale concurrent caller or schedule
+    // edit must not overwrite the current rule. Both schedule fields move
+    // together, so a failure cannot strand an advanced but incomplete pass.
+    await RecurringModel.findOneAndUpdate(
+      { _id: rule._id, nextRunAt: rule.nextRunAt },
+      { $set: { nextRunAt: precomputedNext, lastRunAt: runAts[runAts.length - 1] } },
+      { new: true }
     );
   }
   return created;

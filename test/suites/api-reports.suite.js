@@ -155,14 +155,22 @@ describe("GET /api/reports/dashboard", () => {
 
   it("still serves the dashboard when materialization blows up", async () => {
     const RL = globalThis.__models.rateLimit;
-    RL.aggregate.mockRejectedValue(new Error("ratelimit collection down"));
+    RL.aggregate.mockResolvedValue([]);
+    globalThis.__models.recurring.find.mockRejectedValueOnce(new Error("synthetic recurring read outage"));
     T().aggregate.mockResolvedValue([
       { _id: "income", totalMinor: 1000 },
       { _id: "expense", totalMinor: 400 },
     ]);
-    const res = await get("");
-    expect(res.status).toBe(200);
-    expect((await res.json()).currentBalance).toBe(6);
+    const manager = await import("@/lib/manager/server");
+    const report = vi.spyOn(manager, "logServerError").mockImplementation(() => {});
+    try {
+      const res = await get("");
+      expect(res.status).toBe(200);
+      expect((await res.json()).currentBalance).toBe(6);
+      expect(report).toHaveBeenCalledWith("Recurring materialization on dashboard failed",
+        expect.objectContaining({ message: "synthetic recurring read outage" }),
+        { route: "GET /api/reports/dashboard" });
+    } finally { report.mockRestore(); }
   });
 });
 

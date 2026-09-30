@@ -149,13 +149,25 @@ describe("manager config", () => {
 });
 
 describe("browser provider", () => {
+  const sdkShutdowns = new Set();
+  let realFetch;
   beforeEach(() => {
     setEnv({});
+    localStorage.removeItem("manager.logger.queue");
+    realFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async () =>
+      Response.json({ accepted: 0, rejected: 0 })
+    );
     delete window.__managerClientLogger;
     document.getElementById("manager-tracker")?.remove();
     document.head.innerHTML = "";
   });
   afterEach(() => {
+    // resetModules creates separate SDK registries: close every mounted graph.
+    for (const shutdown of sdkShutdowns) shutdown();
+    sdkShutdowns.clear();
+    localStorage.removeItem("manager.logger.queue");
+    globalThis.fetch = realFetch;
     setEnv({});
     delete window.__managerClientLogger;
     document.getElementById("manager-tracker")?.remove();
@@ -166,6 +178,8 @@ describe("browser provider", () => {
     const { default: ManagerProvider } = await import(
       "@/lib/manager/ManagerProvider"
     );
+    const { shutdownLoggers } = await import("@/lib/manager/logger");
+    sdkShutdowns.add(shutdownLoggers);
     const { render } = await import("@testing-library/react");
     const { createElement } = await import("react");
     return render(createElement(ManagerProvider));
