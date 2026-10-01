@@ -284,3 +284,7 @@ Packaged FinTrack as a native iOS app using Capacitor 8 with Swift Package Manag
 ## Implemented documentation update — 2026-09-30
 
 Required, feature-specific and optional environment settings are now listed in README against the current code, including standalone helpers and deployment/rebuild behavior. Fresh database setup and public/private Manager key separation are documented; obsolete provider/secret names are identified. No runtime configuration or credentials changed.
+
+## 🟢 Cross-app integration verification
+
+- (2026-09-30, verified) Existing Finance Manager integration required no executable changes. Current Manager SDK matches, live checker passes all 21 checks without skips; Chrome authenticated dashboard, protected API, stored browser/server traces, pageviews and password/account-number redaction pass. See `docs/verification/manager-integration-2026-09-30.md`.

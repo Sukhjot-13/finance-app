@@ -590,3 +590,7 @@ what was real versus mocked, and the cleanup performed.
 - `.env.example`: placeholder-only complete application/Manager template and commented optional native, release and standalone-tool settings (updated 2026-09-30). No functions.
 
 Documentation synchronization (2026-09-30): `README.md` and the Environment Variables inventory describe the current required/optional configuration and tools. `docs/suggestions.md` records the completed documentation update; no executable functions or runtime behavior changed.
+
+## Integration verification follow-up (2026-09-30)
+
+`docs/verification/manager-integration-2026-09-30.md` records the current cross-app regression, production-build, browser/API/database, key separation, redaction, trace correlation, analytics, outage and burst-delivery evidence with reproduction steps and limitations. No executable functions.
